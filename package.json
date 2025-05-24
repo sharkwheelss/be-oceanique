@@ -1,0 +1,37 @@
+{
+    "name": "auth-api-typescript",
+    "version": "1.0.0",
+    "description": "Authentication API with Express.js, MySQL and TypeScript",
+    "main": "dist/server.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/server.js",
+        "dev": "nodemon",
+        "clean": "rimraf dist",
+        "prebuild": "npm run clean"
+    },
+    "dependencies": {
+        "bcrypt": "^5.1.0",
+        "cookie-parser": "^1.4.6",
+        "cors": "^2.8.5",
+        "dotenv": "^16.0.3",
+        "express": "^4.18.2",
+        "express-mysql-session": "^2.1.8",
+        "express-session": "^1.17.3",
+        "express-validator": "^6.14.3",
+        "mysql2": "^3.1.2"
+    },
+    "devDependencies": {
+        "@types/bcrypt": "^5.0.0",
+        "@types/cookie-parser": "^1.4.3",
+        "@types/cors": "^2.8.13",
+        "@types/express": "^4.17.17",
+        "@types/express-mysql-session": "^2.1.3",
+        "@types/express-session": "^1.17.6",
+        "@types/node": "^18.15.0",
+        "nodemon": "^2.0.20",
+        "rimraf": "^4.4.0",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.0.0"
+    }
+}
