@@ -12,6 +12,7 @@ export interface User {
     username: string;
     email: string;
     password: string;
+    user_types_id: number;
     created_at: Date;
 }
 
@@ -19,6 +20,7 @@ export interface UserResponse {
     id: number;
     username: string;
     email: string;
+    user_types_id: number;
     created_at?: Date;
 }
 
@@ -38,6 +40,8 @@ export interface SigninRequest {
 export interface SessionData extends Session {
     userId?: number;
     username?: string;
+    email?: string;
+    userTypesId?: number;
 }
 
 // Extended Request interface with session

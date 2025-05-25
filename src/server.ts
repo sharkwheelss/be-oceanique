@@ -7,7 +7,6 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
-import MySQLStore from 'express-mysql-session';
 import dotenv from 'dotenv';
 import { initDatabase, dbConfig } from './config/database';
 import authRoutes from './routes/auth';
@@ -19,7 +18,7 @@ const app: Application = express();
 const PORT: number = parseInt(process.env.PORT || '5000');
 
 // Create MySQL session store
-const MySQLSessionStore = MySQLStore(session);
+const MySQLStore = require('express-mysql-session')(session);
 
 // Middleware setup
 app.use(express.json());
@@ -27,17 +26,16 @@ app.use(cookieParser());
 
 // CORS configuration for frontend access
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || '',
     credentials: true
 }));
 
 // Session store setup using MySQL
-const sessionStore = new MySQLSessionStore(dbConfig);
+const sessionStore = new MySQLStore(dbConfig);
 
 // Session middleware configuration
 app.use(session({
-    key: 'auth_session',
-    secret: process.env.SESSION_SECRET || 'your_secure_session_secret',
+    secret: process.env.SESSION_SECRET || 'u7!@#9d$2kLz%8vN^pQw3&xZs*1BfGmT0rJcH',
     store: sessionStore,
     resave: false,
     saveUninitialized: false,

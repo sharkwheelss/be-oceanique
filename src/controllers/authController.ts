@@ -57,9 +57,19 @@ export const signup = async (
         const hashedPassword: string = await bcrypt.hash(password, saltRounds);
 
         // Insert the new user into the database
+        // Get user_types_id from request body or determine it based on the registration endpoint
+        const userTypesId = req.body.userTypesId || req.query.userType || 1; // Default to 1 if not specified
+
+        // Validate user type is within allowed range
+        if (![1, 2, 3].includes(userTypesId)) {
+            return res.status(400).json({
+            message: 'Invalid user type specified'
+            });
+        }
+
         const [result] = await connection.query<ResultSetHeader>(
-            'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-            [username, email, hashedPassword]
+            'INSERT INTO users (username, email, password, user_types_id) VALUES (?, ?, ?, ?)',
+            [username, email, hashedPassword, userTypesId]
         );
 
         connection.release();
@@ -70,7 +80,8 @@ export const signup = async (
             user: {
                 id: result.insertId,
                 username,
-                email
+                email,
+                user_types_id: userTypesId,
             }
         });
     } catch (error) {
@@ -126,6 +137,8 @@ export const signin = async (
         // Create a session for the authenticated user
         req.session.userId = user.id;
         req.session.username = user.username;
+        req.session.email = user.email;
+        req.session.userTypesId = user.user_types_id;
 
         // Return success response (without sensitive information)
         return res.status(200).json({
@@ -133,7 +146,8 @@ export const signin = async (
             user: {
                 id: user.id,
                 username: user.username,
-                email: user.email
+                email: user.email,
+                user_types_id: user.user_types_id,
             }
         });
     } catch (error) {
@@ -155,7 +169,7 @@ export const getCurrentUser = async (
     try {
         const connection = await pool.getConnection();
         const [users] = await connection.query<RowDataPacket[]>(
-            'SELECT id, username, email, created_at FROM users WHERE id = ?',
+            'SELECT id, username, email, user_types_id, created_at FROM users WHERE id = ?',
             [req.session.userId]
         );
 
@@ -192,9 +206,10 @@ export const logout = (
 
         // Clear the session cookie
         res.clearCookie('auth_session');
-        res.status(200).json({ message: 'Logout successful' });
+        return res.status(200).json({ message: 'Logout successful' });
     });
 };
+
 
 /**
  * Check authentication status controller
@@ -209,7 +224,9 @@ export const checkAuth = (
             authenticated: true,
             user: {
                 id: req.session.userId,
-                username: req.session.username || ''
+                username: req.session.username || '',
+                email: req.session.email || '',
+                user_types_id: req.session.userTypesId || 1,
             }
         });
     }
