@@ -66,6 +66,7 @@ export interface DatabaseConfig {
 // API Response types
 export interface ApiResponse<T = any> {
     message: string;
+    token?: string;
     user?: T;
     errors?: any[];
 }

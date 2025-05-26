@@ -63,7 +63,7 @@ export const signup = async (
         // Validate user type is within allowed range
         if (![1, 2, 3].includes(userTypesId)) {
             return res.status(400).json({
-            message: 'Invalid user type specified'
+                message: 'Invalid user type specified'
             });
         }
 
@@ -140,9 +140,18 @@ export const signin = async (
         req.session.email = user.email;
         req.session.userTypesId = user.user_types_id;
 
+        // Create a simple session identifier as token
+        const token = req.session.id;
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: false,
+            sameSite: 'lax'
+        });
+
         // Return success response (without sensitive information)
         return res.status(200).json({
             message: 'Authentication successful',
+            token,
             user: {
                 id: user.id,
                 username: user.username,
