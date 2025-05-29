@@ -10,6 +10,7 @@ import session from 'express-session';
 import dotenv from 'dotenv';
 import { initDatabase, dbConfig } from './config/database';
 import authRoutes from './routes/auth';
+import path from 'path';
 
 // Load environment variables
 dotenv.config();
@@ -48,6 +49,10 @@ app.use(session({
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/recommendations', authRoutes)
+
+// Serve static files from the 'public' directory
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

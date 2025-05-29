@@ -20,10 +20,6 @@ export const dbConfig: DatabaseConfig = {
 // Create the MySQL connection pool
 export const pool: Pool = mysql.createPool(dbConfig);
 
-/**
- * Database initialization function
- * Creates users table if it doesn't exist
- */
 export async function initDatabase(): Promise<void> {
     try {
         const connection: PoolConnection = await pool.getConnection();

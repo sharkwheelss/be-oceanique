@@ -20,8 +20,9 @@ export interface UserResponse {
     id: number;
     username: string;
     email: string;
+    address?: string;
     user_types_id: number;
-    created_at?: Date;
+    user_personality_id?: number | null;
 }
 
 export interface SignupRequest {
@@ -41,7 +42,9 @@ export interface SessionData extends Session {
     userId?: number;
     username?: string;
     email?: string;
+    address?: string;
     userTypesId?: number;
+    userPersonalityId?: number;
 }
 
 // Extended Request interface with session
@@ -69,11 +72,18 @@ export interface ApiResponse<T = any> {
     token?: string;
     user?: T;
     errors?: any[];
+    data?: T[];
 }
 
 export interface AuthResponse {
     authenticated: boolean;
     user?: UserResponse;
+}
+
+export interface UserPersonality {
+    id: number;
+    name: string;
+    description: string;
 }
 
 // Environment variables

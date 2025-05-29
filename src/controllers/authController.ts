@@ -178,7 +178,7 @@ export const getCurrentUser = async (
     try {
         const connection = await pool.getConnection();
         const [users] = await connection.query<RowDataPacket[]>(
-            'SELECT id, username, email, user_types_id, created_at FROM users WHERE id = ?',
+            'SELECT * FROM users WHERE id = ?',
             [req.session.userId]
         );
 
@@ -235,7 +235,9 @@ export const checkAuth = (
                 id: req.session.userId,
                 username: req.session.username || '',
                 email: req.session.email || '',
+                address: req.session.address || '',
                 user_types_id: req.session.userTypesId || 1,
+                user_personality_id: req.session.userPersonalityId || null
             }
         });
     }
