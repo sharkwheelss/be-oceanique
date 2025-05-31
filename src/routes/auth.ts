@@ -13,7 +13,7 @@ import {
     logout,
     checkAuth,
 } from '../controllers/authController';
-import { getAllPersonalities } from '../controllers/recommendationController';
+
 
 const router: Router = Router();
 
@@ -23,7 +23,6 @@ router.post('/signin', validateSignin, signin);
 router.get('/check', checkAuth);
 
 // Protected routes
-router.get('/personality', isAuthenticated, getAllPersonalities);
 router.get('/me', isAuthenticated, getCurrentUser);
 router.post('/logout', logout);
 

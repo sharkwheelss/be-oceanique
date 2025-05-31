@@ -39,4 +39,6 @@ export const getAllPersonalities = async (
             message: 'Server error retrieving personalities'
         });
     }
+
+
 }
