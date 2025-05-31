@@ -139,6 +139,7 @@ export const signin = async (
         req.session.username = user.username;
         req.session.email = user.email;
         req.session.userTypesId = user.user_types_id;
+        req.session.userPersonalityId = user.user_personality_id;
 
         // Create a simple session identifier as token
         const token = req.session.id;
@@ -157,6 +158,7 @@ export const signin = async (
                 username: user.username,
                 email: user.email,
                 user_types_id: user.user_types_id,
+                user_personality_id: user.user_personality_id
             }
         });
     } catch (error) {

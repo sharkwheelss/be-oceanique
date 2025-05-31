@@ -13,6 +13,7 @@ export interface User {
     email: string;
     password: string;
     user_types_id: number;
+    user_personality_id: number;
     created_at: Date;
 }
 
