@@ -68,11 +68,14 @@ export const getUserPersonality = async (
             });
         }
 
-        const personality = rows[0] as UserPersonality;
+        const imgPersonalities: UserPersonality[] = rows.map((personality: RowDataPacket) => ({
+            ...(personality as UserPersonality),
+            img_path: `${req.protocol}://${req.get('host')}/uploads/personalities/${personality.img_path}`
+        }));
 
         return res.status(200).json({
             message: 'User personality retrieved successfully',
-            data: [personality]
+            data: imgPersonalities as UserPersonality[]
         });
     } catch (error) {
         console.error('Get user personality error:', error);
