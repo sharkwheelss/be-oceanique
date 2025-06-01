@@ -124,12 +124,36 @@ export const getPreferenceCategories = async (
 ): Promise<Response> => {
     try {
         const connection = await pool.getConnection();
+
+        // First check user_preferences table
+        const [userPreferences] = await connection.query<RowDataPacket[]>(`
+            SELECT 
+            pc.id, 
+            pc.name,
+            pc.information,
+            up.score as default_score
+            FROM user_preferences up
+            INNER JOIN preference_categories pc ON up.preference_categories_id = pc.id 
+            WHERE up.users_id = ?
+        `, [req.session.userId]);
+
+        // If user preferences exist, return them
+        if (userPreferences.length > 0) {
+            connection.release();
+            return res.status(200).json({
+                message: 'User preference categories retrieved successfully',
+                data: userPreferences as PreferenceCategory[]
+            });
+        }
+
+        // If no user preferences, fall back to default preferences
         const [userPersonality] = await connection.query<RowDataPacket[]>(
             'SELECT user_personality_id FROM users WHERE id = ?',
             [req.session.userId]
         );
 
         if (!userPersonality[0]?.user_personality_id) {
+            connection.release();
             return res.status(404).json({
                 message: 'User personality not found'
             });
@@ -157,7 +181,7 @@ export const getPreferenceCategories = async (
         }
 
         return res.status(200).json({
-            message: 'Preference categories retrieved successfully',
+            message: 'Default preference categories retrieved successfully',
             data: categories as PreferenceCategory[]
         });
 
