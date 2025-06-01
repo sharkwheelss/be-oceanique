@@ -4,7 +4,8 @@ import {
     getAllPersonalities,
     updateUserPersonality,
     getUserPersonality,
-    getPreferenceCategories
+    getPreferenceCategories,
+    updateUserPreferences
 } from '../controllers/recommendationController';
 
 const router: Router = Router();
@@ -14,5 +15,6 @@ router.get('/personality', isAuthenticated, getAllPersonalities);
 router.get('/personality/user', isAuthenticated, getUserPersonality);
 router.post('/personality/update', isAuthenticated, updateUserPersonality);
 router.get('/preferences/categories', isAuthenticated, getPreferenceCategories);
+router.post('/preferences/update', isAuthenticated, updateUserPreferences);
 
 export default router;

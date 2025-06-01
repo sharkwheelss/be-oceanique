@@ -192,3 +192,58 @@ export const getPreferenceCategories = async (
         });
     }
 };
+
+export const updateUserPreferences = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const { preferenceScores } = req.body;
+
+        if (!userId || !preferenceScores || !Array.isArray(preferenceScores)) {
+            return res.status(400).json({
+                message: 'Invalid request data'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        let msg = '';
+
+        for (const preference of preferenceScores) {
+            // Check if preference exists
+            const [existing] = await connection.query<RowDataPacket[]>(
+                'SELECT id FROM user_preferences WHERE users_id = ? AND preference_categories_id = ?',
+                [userId, preference.categoryId]
+            );
+
+            if (existing.length > 0) {
+                // Update existing preference
+                await connection.query(
+                    'UPDATE user_preferences SET score = ? WHERE users_id = ? AND preference_categories_id = ?',
+                    [preference.score, userId, preference.categoryId]
+                );
+                msg = 'User preferences updated successfully';
+            } else {
+                // Insert new preference
+                await connection.query(
+                    'INSERT INTO user_preferences (users_id, preference_categories_id, score) VALUES (?, ?, ?)',
+                    [userId, preference.categoryId, preference.score]
+                );
+                msg = 'User preferences created successfully';
+            }
+        }
+
+        connection.release();
+
+        return res.status(200).json({
+            message: msg
+        });
+    } catch (error) {
+        console.error('Update user preferences error:', error);
+        return res.status(500).json({
+            message: 'Server error updating user preferences'
+        });
+    }
+};
