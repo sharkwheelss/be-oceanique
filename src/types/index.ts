@@ -87,6 +87,12 @@ export interface UserPersonality {
     description: string;
 }
 
+export interface PreferenceCategory {
+    id: number;
+    name: string;
+    default_score: number;
+}
+
 // Environment variables
 export interface EnvConfig {
     PORT: string;

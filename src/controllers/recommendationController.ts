@@ -4,7 +4,7 @@ import {
     AuthenticatedRequest,
     UserPersonality,
     ApiResponse,
-    User
+    User, PreferenceCategory
 } from '../types';
 import { RowDataPacket } from 'mysql2';
 
@@ -114,6 +114,57 @@ export const updateUserPersonality = async (
         console.error('Update user personality error:', error);
         return res.status(500).json({
             message: 'Server error updating user personality'
+        });
+    }
+};
+
+export const getPreferenceCategories = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<PreferenceCategory>>
+): Promise<Response> => {
+    try {
+        const connection = await pool.getConnection();
+        const [userPersonality] = await connection.query<RowDataPacket[]>(
+            'SELECT user_personality_id FROM users WHERE id = ?',
+            [req.session.userId]
+        );
+
+        if (!userPersonality[0]?.user_personality_id) {
+            return res.status(404).json({
+                message: 'User personality not found'
+            });
+        }
+
+        const [categories] = await connection.query<RowDataPacket[]>(`
+            SELECT 
+            pc.id, 
+            pc.name,
+            pc.information,
+            dp.default_score 
+            FROM default_preferences dp 
+            INNER JOIN preference_categories pc ON dp.preference_categories_id = pc.id 
+            WHERE dp.user_personalites_id = ?
+        `,
+            [userPersonality[0].user_personality_id]
+        );
+
+        connection.release();
+
+        if (categories.length === 0) {
+            return res.status(404).json({
+                message: 'No preference categories found'
+            });
+        }
+
+        return res.status(200).json({
+            message: 'Preference categories retrieved successfully',
+            data: categories as PreferenceCategory[]
+        });
+
+    } catch (error) {
+        console.error('Get preference categories error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving preference categories'
         });
     }
 };
