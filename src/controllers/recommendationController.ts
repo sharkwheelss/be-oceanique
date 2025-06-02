@@ -4,7 +4,8 @@ import {
     AuthenticatedRequest,
     UserPersonality,
     ApiResponse,
-    User, PreferenceCategory
+    User, PreferenceCategory,
+    Questions
 } from '../types';
 import { RowDataPacket } from 'mysql2';
 
@@ -247,3 +248,70 @@ export const updateUserPreferences = async (
         });
     }
 };
+
+export const getAllQuestions = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<Questions>>
+): Promise<Response> => {
+    try {
+        const connection = await pool.getConnection();
+
+        const [rows] = await connection.query<RowDataPacket[]>(`
+            SELECT 
+                q.id,
+                q.question_text,
+                q.question_type,
+                q.preference_categories_id,
+                pc.name as category_name,
+                o.id as option_id,
+                o.name as option_text
+            FROM questions q
+            LEFT JOIN preference_categories pc ON q.preference_categories_id = pc.id
+            LEFT JOIN options o ON pc.id = o.preference_categories_id
+            ORDER BY q.id , o.id;
+        `);
+
+        const questionsMap = new Map<number, Questions>();
+
+        rows.forEach((row: RowDataPacket) => {
+            if (!questionsMap.has(row.id)) {
+                questionsMap.set(row.id, {
+                    id: row.id,
+                    question: row.question_text,
+                    question_type: row.question_type,
+                    category: row.category_name,
+                    options: []
+                });
+            }
+
+            // Add option only if exists (in case of LEFT JOIN with null options)
+            if (row.option_id && row.option_text) {
+                questionsMap.get(row.id)?.options.push({
+                    id: row.option_id,
+                    option_text: row.option_text,
+                    option_value: row.option_text.toLowerCase().replace(/\s+/g, '_')
+                });
+            }
+        });
+
+        connection.release();
+
+        const questionsArray = Array.from(questionsMap.values());
+
+        if (questionsArray.length === 0) {
+            return res.status(404).json({
+                message: 'No questions found'
+            });
+        }
+
+        return res.status(200).json({
+            message: 'Questions retrieved successfully',
+            data: questionsArray
+        });
+    } catch (error) {
+        console.error('Get questions error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving questions'
+        });
+    }
+}
