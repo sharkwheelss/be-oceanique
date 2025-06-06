@@ -71,6 +71,7 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
  */
 async function startServer(): Promise<void> {
     try {
+        console.log('Initializing database...');
         await initDatabase();
         app.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);

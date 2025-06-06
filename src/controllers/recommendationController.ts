@@ -5,7 +5,8 @@ import {
     UserPersonality,
     ApiResponse,
     User, PreferenceCategory,
-    Questions
+    Questions,
+    BeachMatch
 } from '../types';
 import { RowDataPacket } from 'mysql2';
 
@@ -315,3 +316,102 @@ export const getAllQuestions = async (
         });
     }
 }
+
+export const getBeachRecommendations = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<BeachMatch>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+
+        // 1. Get user selected options from frontend (request body)
+        const { userOptions } = req.body;
+
+        if (!userOptions || !Array.isArray(userOptions) || userOptions.length === 0) {
+            return res.status(400).json({ message: 'No user options provided' });
+        }
+
+        const userOptionSet = new Set(userOptions);
+        const connection = await pool.getConnection();
+
+        // 2. Get all beach options with priority logic
+        // First check review_summary table, then fall back to beaches_default_options
+        const [reviewSummaryBeaches] = await connection.query<RowDataPacket[]>(`
+            SELECT DISTINCT beaches_id 
+            FROM review_summary
+        `);
+        console.log('no data inside review_summary')
+
+        const reviewSummaryBeachIds = reviewSummaryBeaches.map((row: any) => row.beaches_id);
+
+        let beachOptionsQuery = '';
+        let queryParams: any[] = [];
+
+        if (reviewSummaryBeachIds.length > 0) {
+            // Get options from review_summary for beaches that have data there
+            // and from beaches_default_options for beaches that don't
+            console.log('using data inside review_summary')
+            beachOptionsQuery = `
+                SELECT beaches_id, option_id, 'review_summary' as source
+                FROM (
+                    SELECT beaches_id as beach_id, option_id
+                    FROM review_summary
+                    WHERE beaches_id IN (${reviewSummaryBeachIds.map(() => '?').join(',')})
+                ) rs
+                UNION ALL
+                SELECT beach_id, option_id, 'default_options' as source
+                FROM beaches_default_options bdo
+                WHERE beach_id NOT IN (${reviewSummaryBeachIds.map(() => '?').join(',')})
+            `;
+            queryParams = [...reviewSummaryBeachIds, ...reviewSummaryBeachIds];
+        } else {
+            // If no review_summary data exists, use only beaches_default_options
+            console.log('using data inside default_options')
+            beachOptionsQuery = `
+                SELECT beaches_id, options_id, 'default_options' as source
+                FROM beaches_default_options
+            `;
+        }
+
+        const [beachOptions] = await connection.query<RowDataPacket[]>(beachOptionsQuery, queryParams);
+
+        // 3. Group beach options by beach_id
+        const beachMap: Record<number, Set<number>> = {};
+        beachOptions.forEach((row: any) => {
+            if (!beachMap[row.beach_id]) {
+                beachMap[row.beach_id] = new Set();
+            }
+            beachMap[row.beach_id].add(row.option_id);
+        });
+
+        // 4. Compute Modified Jaccard (Containment Similarity)
+        const results: BeachMatch[] = [];
+        for (const [beachIdStr, beachOptionSet] of Object.entries(beachMap)) {
+            const beachId = parseInt(beachIdStr);
+            const intersectionSize = [...userOptionSet].filter(opt => beachOptionSet.has(opt)).length;
+
+            // Modified Jaccard: match based on how much of user's options are covered
+            const similarity = intersectionSize / userOptionSet.size;
+            results.push({
+                beach_id: beachId,
+                match_percentage: Math.round(similarity * 100)
+            });
+        }
+
+        connection.release();
+
+        // Sort by highest match percentage
+        results.sort((a, b) => b.match_percentage - a.match_percentage);
+
+        return res.status(200).json({
+            message: 'Beach recommendations generated successfully',
+            data: results
+        });
+
+    } catch (error) {
+        console.error('Get beach recommendations error:', error);
+        return res.status(500).json({
+            message: 'Server error generating recommendations'
+        });
+    }
+};

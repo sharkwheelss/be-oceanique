@@ -4,7 +4,10 @@
     ],
     "ext": "ts,json",
     "ignore": [
-        "src/**/*.spec.ts"
+        "src/**/*.spec.ts",
+        "uploads",
+        "dist",
+        "node_modules"
     ],
-    "exec": "ts-node ./src/server.ts"
+    "exec": "ts-node --transpile-only src/server.ts"
 }
