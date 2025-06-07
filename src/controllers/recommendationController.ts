@@ -6,7 +6,8 @@ import {
     ApiResponse,
     User, PreferenceCategory,
     Questions,
-    BeachMatch
+    BeachMatch,
+    Beaches
 } from '../types';
 import { RowDataPacket } from 'mysql2';
 
@@ -472,7 +473,6 @@ export const getBeachRecommendations = async (
 
                     console.log('totalWeightedScore: ', totalWeightedScore)
                     console.log('totalPossibleWeight: ', totalPossibleWeight)
-                    
                 }
             }
 
@@ -487,14 +487,66 @@ export const getBeachRecommendations = async (
             });
         }
 
-        connection.release();
-
-        // Sort by highest match percentage
+        // Sort by highest match percentage first
         results.sort((a, b) => b.match_percentage - a.match_percentage);
+
+        // 7. Get beach details for all recommended beaches
+        const beachIds = results.map(result => result.beach_id);
+
+        if (beachIds.length === 0) {
+            connection.release();
+            return res.status(200).json({
+                message: 'No beach recommendations found',
+                data: []
+            });
+        }
+
+        const [beachDetails] = await connection.query<RowDataPacket[]>(
+            `SELECT b.id, b.beach_name, b.descriptions, b.cp_name, b.official_website, 
+            b.rating_average, b.estimate_price, b.latitude, b.longitude, 
+            k.name as kecamatan, kk.name as kota, p.name as province
+            FROM beaches b 
+            INNER JOIN kecamatans k ON k.id = b.kecamatans_id  
+            INNER JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id 
+            INNER JOIN provinsis p ON p.id = kk.provinsis_id 
+            WHERE b.id IN (${beachIds.map(() => '?').join(',')})`,
+            beachIds
+        );
+
+        console.log('beachDetails: ', beachDetails);
+
+        // 8. Create a map of beach details for easy lookup
+        const beachDetailsMap: Record<number, any> = {};
+        beachDetails.forEach((beach: any) => {
+            beachDetailsMap[beach.id] = beach;
+        });
+
+        // 9. Combine match results with beach details
+        const detailedResults: Beaches[] = results.map(result => {
+            const beachDetail = beachDetailsMap[result.beach_id];
+            return {
+                beach_id: result.beach_id,
+                match_percentage: result.match_percentage,
+                beach_name: beachDetail.beach_name,
+                descriptions: beachDetail.descriptions,
+                cp_name: beachDetail?.cp_name || '-',
+                official_website: beachDetail?.official_website || '-',
+                rating_average: beachDetail?.rating_average || 0,
+                estimate_price: beachDetail.estimate_price,
+                latitude: beachDetail?.latitude || 0,
+                longitude: beachDetail?.longitude || 0,
+                kecamatan_name: beachDetail?.kecamatan || '',
+                kota_name: beachDetail?.kota || '',
+                province_name: beachDetail?.province || ''
+
+            };
+        });
+
+        connection.release();
 
         return res.status(200).json({
             message: 'Beach recommendations generated successfully',
-            data: results
+            data: detailedResults
         });
 
     } catch (error) {

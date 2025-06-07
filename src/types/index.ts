@@ -107,11 +107,28 @@ export interface Questions {
     options: Option[];
 }
 
+export interface Reviews {
+    
+}
+
 export interface BeachMatch {
     beach_id: number;
     match_percentage: number;
 }
 
+export interface Beaches extends BeachMatch {
+    beach_name: string;
+    descriptions: string;
+    cp_name?: string;
+    official_website?: string;
+    rating_average: number;
+    estimate_price: string;
+    latitude?: string;
+    longitude?: string;
+    kecamatan_name: string;
+    kota_name: string;
+    province_name: string;
+}
 // Environment variables
 export interface EnvConfig {
     PORT: string;
