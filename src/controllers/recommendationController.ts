@@ -5,9 +5,9 @@ import {
     UserPersonality,
     ApiResponse,
     User, PreferenceCategory,
-    Questions,
-    BeachMatch,
-    Beaches
+    Questions, BeachMatch,
+    UserPreference, BeachOption, BeachDetail
+
 } from '../types';
 import { RowDataPacket } from 'mysql2';
 
@@ -322,227 +322,42 @@ export const getBeachRecommendations = async (
     req: AuthenticatedRequest,
     res: Response<ApiResponse<BeachMatch>>
 ): Promise<Response> => {
+    const connection = await pool.getConnection();
+
     try {
-        const userId = req.session.userId;
-        // 1. Get user selected options from frontend (request body)
+        const userId = req.session.userId || 0;
         const { userOptions } = req.body;
 
+        // Validate input
         if (!userOptions || !Array.isArray(userOptions) || userOptions.length === 0) {
             return res.status(400).json({ message: 'No user options provided' });
         }
 
-        const connection = await pool.getConnection();
-
-        // 2. Get user preferences (category weights) from user_preferences table
-        const [userPreferences] = await connection.query<RowDataPacket[]>(`
-            SELECT pc.name, up.score as 'rank'
-            FROM user_preferences up INNER JOIN preference_categories pc 
-            ON pc.id = up.preference_categories_id
-            WHERE users_id = ?
-        `, [userId]);
-
-        console.log('userPreferences: ', userPreferences)
-
-        // get the max rank
-        const maxRank = userPreferences.reduce((sum, pref) => sum + pref.rank, 0);
-        const weights: Record<string, number> = {};
-
-        console.log('max rank: ', maxRank)
-
-        userPreferences.forEach((pref: any) => {
-            weights[pref.name] = pref.rank / maxRank;
-        });
-
-        console.log('after calculation of category weight: ', weights)
-
-        // 3. Get option categories mapping
-        const [optionCategories] = await connection.query<RowDataPacket[]>(`
-            SELECT o.id, pc.name
-            FROM options o
-            JOIN preference_categories pc ON o.preference_categories_id = pc.id
-        `);
-        console.log('option category: ', optionCategories)
-
-        const optionCategoryMap: Record<number, string> = {};
-        optionCategories.forEach((row: any) => {
-            optionCategoryMap[row.id] = row.name;
-        });
-
-        console.log('optionCategoryMap: ', optionCategoryMap)
-
-        // 4. Get all beach options with priority logic
-        // First check review_summary table, then fall back to beaches_default_options
-        const [reviewSummaryBeaches] = await connection.query<RowDataPacket[]>(`
-            SELECT DISTINCT beaches_id 
-            FROM review_summary
-        `);
-        console.log('reviewSummaryBeaches: ', reviewSummaryBeaches)
-
-        const reviewSummaryBeachIds = reviewSummaryBeaches.map((row: any) => row.beaches_id);
-        console.log('reviewSummaryBeachIds: ', reviewSummaryBeachIds)
-
-        let beachOptionsQuery = '';
-        let queryParams: any[] = [];
-
-        if (reviewSummaryBeachIds.length > 0) {
-            // Get options from review_summary for beaches that have data there
-            // and from beaches_default_options for beaches that don't
-            console.log('using data inside review_summary')
-            beachOptionsQuery = `
-                SELECT beaches_id, options_id, 'review_summary' as source
-                FROM (
-                    SELECT beaches_id, options_id
-                    FROM review_summary
-                    WHERE beaches_id IN (${reviewSummaryBeachIds.map(() => '?').join(',')})
-                ) rs
-                UNION ALL
-                SELECT beaches_id, options_id, 'default_options' as source
-                FROM beaches_default_options bdo
-                WHERE beaches_id NOT IN (${reviewSummaryBeachIds.map(() => '?').join(',')})
-            `;
-            queryParams = [...reviewSummaryBeachIds, ...reviewSummaryBeachIds];
-        } else {
-            // If no review_summary data exists, use only beaches_default_options
-            console.log('using data inside default_options')
-            beachOptionsQuery = `
-                SELECT beaches_id, options_id, 'default_options' as source
-                FROM beaches_default_options
-            `;
+        // Get user preferences and calculate weights
+        const weights = await getUserPreferenceWeights(connection, userId);
+        if (Object.keys(weights).length === 0) {
+            return res.status(400).json({ message: 'User preferences not found' });
         }
 
-        const [beachOptions] = await connection.query<RowDataPacket[]>(beachOptionsQuery, queryParams);
-        console.log('beachOptions', beachOptions)
+        // Get option-category mapping
+        const optionCategoryMap = await getOptionCategoryMap(connection);
 
-        // 5. Group beach options by beach_id
-        const beachMap: Record<number, Set<number>> = {};
-        beachOptions.forEach((row: any) => {
-            if (!beachMap[row.beaches_id]) {
-                beachMap[row.beaches_id] = new Set();
-            }
-            beachMap[row.beaches_id].add(row.options_id);
-        });
-        console.log('beachMap:', beachMap)
+        // Get beach options with priority logic
+        const beachOptions = await getBeachOptions(connection);
+        const beachMap = groupBeachOptionsByBeachId(beachOptions);
 
-        // 6. Compute Weighted Similarity Score
-        const results: BeachMatch[] = [];
-        for (const [beachIdStr, beachOptionSet] of Object.entries(beachMap)) {
-            const beachId = parseInt(beachIdStr);
+        // Calculate weighted similarity scores
+        const results = calculateBeachMatches(userOptions, beachMap, optionCategoryMap, weights);
 
-            console.log('beachIdStr: ', beachIdStr)
-            console.log('beachOptionSet: ', beachOptionSet)
-
-            // Calculate weighted score
-            let totalWeightedScore = 0;
-            let totalPossibleWeight = 0;
-
-            // Group user options by category
-            const userOptionsByCategory: Record<string, number[]> = {};
-            userOptions.forEach((optionId: number) => {
-                const category = optionCategoryMap[optionId];
-                if (category) {
-                    if (!userOptionsByCategory[category]) {
-                        userOptionsByCategory[category] = [];
-                    }
-                    userOptionsByCategory[category].push(optionId);
-                }
-            });
-            console.log('userOptions: ', userOptions)
-            console.log('userOptionsByCategory: ', userOptionsByCategory)
-
-            // Calculate score for each category
-            for (const [category, categoryOptions] of Object.entries(userOptionsByCategory)) {
-                const rankScore = weights[category];
-
-                console.log('category: ', category)
-                console.log('categoryOptions: ', categoryOptions)
-                console.log('rankScore: ', rankScore)
-
-                if (rankScore > 0) {
-                    // Count matches in this category
-                    const matchingOptions = categoryOptions.filter(opt => beachOptionSet.has(opt));
-                    const categoryScore = matchingOptions.length / categoryOptions.length;
-
-                    console.log('matchingOptions: ', matchingOptions)
-                    console.log('categoryScore: ', categoryScore)
-
-                    // main calculation
-                    totalWeightedScore += categoryScore * rankScore;
-
-                    // to make sure all the SUM of rankScore = 1
-                    totalPossibleWeight += rankScore;
-
-                    console.log('totalWeightedScore: ', totalWeightedScore)
-                    console.log('totalPossibleWeight: ', totalPossibleWeight)
-                }
-            }
-
-            // Final similarity score (0-1)
-            const similarity = totalPossibleWeight > 0 ? totalWeightedScore / totalPossibleWeight : 0;
-
-            console.log(`Beach ${beachId}: weighted score = ${similarity}`);
-
-            results.push({
-                beach_id: beachId,
-                match_percentage: Math.round(similarity * 100)
-            });
-        }
-
-        // Sort by highest match percentage first
-        results.sort((a, b) => b.match_percentage - a.match_percentage);
-
-        // 7. Get beach details for all recommended beaches
-        const beachIds = results.map(result => result.beach_id);
-
-        if (beachIds.length === 0) {
-            connection.release();
+        if (results.length === 0) {
             return res.status(200).json({
                 message: 'No beach recommendations found',
                 data: []
             });
         }
 
-        const [beachDetails] = await connection.query<RowDataPacket[]>(
-            `SELECT b.id, b.beach_name, b.descriptions, b.cp_name, b.official_website, 
-            b.rating_average, b.estimate_price, b.latitude, b.longitude, 
-            k.name as kecamatan, kk.name as kota, p.name as province
-            FROM beaches b 
-            INNER JOIN kecamatans k ON k.id = b.kecamatans_id  
-            INNER JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id 
-            INNER JOIN provinsis p ON p.id = kk.provinsis_id 
-            WHERE b.id IN (${beachIds.map(() => '?').join(',')})`,
-            beachIds
-        );
-
-        console.log('beachDetails: ', beachDetails);
-
-        // 8. Create a map of beach details for easy lookup
-        const beachDetailsMap: Record<number, any> = {};
-        beachDetails.forEach((beach: any) => {
-            beachDetailsMap[beach.id] = beach;
-        });
-
-        // 9. Combine match results with beach details
-        const detailedResults: Beaches[] = results.map(result => {
-            const beachDetail = beachDetailsMap[result.beach_id];
-            return {
-                beach_id: result.beach_id,
-                match_percentage: result.match_percentage,
-                beach_name: beachDetail.beach_name,
-                descriptions: beachDetail.descriptions,
-                cp_name: beachDetail?.cp_name || '-',
-                official_website: beachDetail?.official_website || '-',
-                rating_average: beachDetail?.rating_average || 0,
-                estimate_price: beachDetail.estimate_price,
-                latitude: beachDetail?.latitude || 0,
-                longitude: beachDetail?.longitude || 0,
-                kecamatan_name: beachDetail?.kecamatan || '',
-                kota_name: beachDetail?.kota || '',
-                province_name: beachDetail?.province || ''
-
-            };
-        });
-
-        connection.release();
+        // Get detailed beach information
+        const detailedResults = await getDetailedBeachResults(connection, results);
 
         return res.status(200).json({
             message: 'Beach recommendations generated successfully',
@@ -554,5 +369,192 @@ export const getBeachRecommendations = async (
         return res.status(500).json({
             message: 'Server error generating recommendations'
         });
+    } finally {
+        connection.release();
     }
 };
+
+// Helper function to get user preference weights
+async function getUserPreferenceWeights(connection: any, userId: number): Promise<Record<string, number>> {
+    const [userPreferences] = await connection.query(`
+        SELECT pc.name, up.score as 'rank'
+        FROM user_preferences up 
+        INNER JOIN preference_categories pc ON pc.id = up.preference_categories_id
+        WHERE users_id = ?
+    `, [userId]);
+
+    if (userPreferences.length === 0) {
+        return {};
+    }
+
+    const maxRank = userPreferences.reduce((sum: number, pref: UserPreference) => sum + pref.rank, 0);
+    const weights: Record<string, number> = {};
+
+    userPreferences.forEach((pref: UserPreference) => {
+        weights[pref.name] = pref.rank / maxRank;
+    });
+
+    return weights;
+}
+
+// Helper function to get option-category mapping
+async function getOptionCategoryMap(connection: any): Promise<Record<number, string>> {
+    const [optionCategories] = await connection.query(`
+        SELECT o.id, pc.name
+        FROM options o
+        JOIN preference_categories pc ON o.preference_categories_id = pc.id
+    `);
+
+    const optionCategoryMap: Record<number, string> = {};
+    optionCategories.forEach((row: any) => {
+        optionCategoryMap[row.id] = row.name;
+    });
+
+    return optionCategoryMap;
+}
+
+// Helper function to get beach options with priority logic
+async function getBeachOptions(connection: any): Promise<BeachOption[]> {
+    // Get beaches that have review summary data
+    const [reviewSummaryBeaches] = await connection.query(`
+        SELECT DISTINCT beaches_id FROM review_summary
+    `);
+
+    const reviewSummaryBeachIds = reviewSummaryBeaches.map((row: any) => row.beaches_id);
+
+    let beachOptionsQuery = '';
+    let queryParams: any[] = [];
+
+    if (reviewSummaryBeachIds.length > 0) {
+        const placeholders = reviewSummaryBeachIds.map(() => '?').join(',');
+        beachOptionsQuery = `
+            SELECT beaches_id, options_id, 'review_summary' as source
+            FROM review_summary
+            WHERE beaches_id IN (${placeholders})
+            UNION ALL
+            SELECT beaches_id, options_id, 'default_options' as source
+            FROM beaches_default_options bdo
+            WHERE beaches_id NOT IN (${placeholders})
+        `;
+        queryParams = [...reviewSummaryBeachIds, ...reviewSummaryBeachIds];
+    } else {
+        beachOptionsQuery = `
+            SELECT beaches_id, options_id, 'default_options' as source
+            FROM beaches_default_options
+        `;
+    }
+
+    const [beachOptions] = await connection.query(beachOptionsQuery, queryParams);
+    return beachOptions as BeachOption[];
+}
+
+// Helper function to group beach options by beach ID
+function groupBeachOptionsByBeachId(beachOptions: BeachOption[]): Record<number, Set<number>> {
+    const beachMap: Record<number, Set<number>> = {};
+
+    beachOptions.forEach((row) => {
+        if (!beachMap[row.beaches_id]) {
+            beachMap[row.beaches_id] = new Set();
+        }
+        beachMap[row.beaches_id].add(row.options_id);
+    });
+
+    return beachMap;
+}
+
+// Helper function to calculate beach matches
+function calculateBeachMatches(
+    userOptions: number[],
+    beachMap: Record<number, Set<number>>,
+    optionCategoryMap: Record<number, string>,
+    weights: Record<string, number>
+): BeachMatch[] {
+    // Group user options by category
+    const userOptionsByCategory: Record<string, number[]> = {};
+    userOptions.forEach((optionId) => {
+        const category = optionCategoryMap[optionId];
+        if (category) {
+            if (!userOptionsByCategory[category]) {
+                userOptionsByCategory[category] = [];
+            }
+            userOptionsByCategory[category].push(optionId);
+        }
+    });
+
+    const results: BeachMatch[] = [];
+
+    for (const [beachIdStr, beachOptionSet] of Object.entries(beachMap)) {
+        const beachId = parseInt(beachIdStr);
+        let totalWeightedScore = 0;
+        let totalPossibleWeight = 0;
+
+        // Calculate score for each category
+        for (const [category, categoryOptions] of Object.entries(userOptionsByCategory)) {
+            const rankScore = weights[category];
+
+            if (rankScore > 0) {
+                const matchingOptions = categoryOptions.filter(opt => beachOptionSet.has(opt));
+                const categoryScore = matchingOptions.length / categoryOptions.length;
+
+                totalWeightedScore += categoryScore * rankScore;
+                totalPossibleWeight += rankScore;
+            }
+        }
+
+        // Calculate final similarity score (0-1)
+        const similarity = totalPossibleWeight > 0 ? totalWeightedScore / totalPossibleWeight : 0;
+
+        results.push({
+            beach_id: beachId,
+            match_percentage: Math.round(similarity * 100)
+        });
+    }
+
+    // Sort by highest match percentage first
+    return results.sort((a, b) => b.match_percentage - a.match_percentage);
+}
+
+// Helper function to get detailed beach results
+async function getDetailedBeachResults(connection: any, results: BeachMatch[]): Promise<BeachDetail[]> {
+    const beachIds = results.map(result => result.beach_id);
+    const placeholders = beachIds.map(() => '?').join(',');
+
+    const [beachDetails] = await connection.query(
+        `SELECT b.id, b.beach_name, b.descriptions, b.cp_name, b.official_website, 
+         b.rating_average, b.estimate_price, b.latitude, b.longitude, 
+         k.name as kecamatan, kk.name as kota, p.name as province
+         FROM beaches b 
+         INNER JOIN kecamatans k ON k.id = b.kecamatans_id  
+         INNER JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id 
+         INNER JOIN provinsis p ON p.id = kk.provinsis_id 
+         WHERE b.id IN (${placeholders})`,
+        beachIds
+    );
+
+    // Create a map of beach details for easy lookup
+    const beachDetailsMap: Record<number, BeachDetail> = {};
+    beachDetails.forEach((beach: BeachDetail) => {
+        beachDetailsMap[beach.id] = beach;
+    });
+
+    // Combine match results with beach details
+    return results.map(result => {
+        const beachDetail = beachDetailsMap[result.beach_id];
+        return {
+            beach_id: result.beach_id,
+            match_percentage: result.match_percentage,
+            id: beachDetail.id,
+            beach_name: beachDetail.beach_name,
+            descriptions: beachDetail.descriptions,
+            cp_name: beachDetail?.cp_name || '-',
+            official_website: beachDetail?.official_website || '-',
+            rating_average: beachDetail?.rating_average || 0,
+            estimate_price: beachDetail.estimate_price,
+            latitude: beachDetail?.latitude || 0,
+            longitude: beachDetail?.longitude || 0,
+            kecamatan: beachDetail?.kecamatan || '',
+            kota: beachDetail?.kota || '',
+            province: beachDetail?.province || ''
+        };
+    });
+}

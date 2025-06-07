@@ -108,7 +108,7 @@ export interface Questions {
 }
 
 export interface Reviews {
-    
+
 }
 
 export interface BeachMatch {
@@ -116,18 +116,30 @@ export interface BeachMatch {
     match_percentage: number;
 }
 
-export interface Beaches extends BeachMatch {
+export interface UserPreference {
+    name: string;
+    rank: number;
+}
+
+export interface BeachOption {
+    beaches_id: number;
+    options_id: number;
+    source: string;
+}
+
+export interface BeachDetail extends BeachMatch {
+    id: number;
     beach_name: string;
     descriptions: string;
     cp_name?: string;
     official_website?: string;
-    rating_average: number;
-    estimate_price: string;
-    latitude?: string;
-    longitude?: string;
-    kecamatan_name: string;
-    kota_name: string;
-    province_name: string;
+    rating_average?: number;
+    estimate_price: number;
+    latitude?: number;
+    longitude?: number;
+    kecamatan: string;
+    kota: string;
+    province: string;
 }
 // Environment variables
 export interface EnvConfig {
