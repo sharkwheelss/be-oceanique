@@ -318,7 +318,7 @@ export const getAllQuestions = async (
     }
 }
 
-export const getBeachRecommendations = async (
+export const BeachRecommendations = async (
     req: AuthenticatedRequest,
     res: Response<ApiResponse<BeachMatch>>
 ): Promise<Response> => {
