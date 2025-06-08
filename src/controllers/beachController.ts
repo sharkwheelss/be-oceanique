@@ -32,7 +32,7 @@ export const getAllBeaches = async (
 
         const imgBeach: BeachDetail[] = beaches.map(beach => ({
             ...(beach as BeachDetail),
-            img_path: `${req.protocol}://${req.get('host')}/uploads/beaches/${beach.path}`
+            img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${beach.path}`
         }));
 
         return res.status(200).json({
@@ -111,7 +111,7 @@ export const getBeachDetails = async (
         // Structure the response with grouped sections
         const beach = {
             ...(beachDetails[0] as BeachDetail),
-            img_path: `${req.protocol}://${req.get('host')}/uploads/beaches/${beachDetails[0].path}`,
+            img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${beachDetails[0].path}`,
             activities: activities.map(activity => ({
                 id: activity.id,
                 option_id: activity.options_id,
@@ -130,7 +130,7 @@ export const getBeachDetails = async (
                 beaches_id: content.beaches_id,
                 reviews_id: content.reviews_id,
                 // Add full image path for contents if needed
-                img_path: content.path ? `${req.protocol}://${req.get('host')}/uploads/beaches/${content.path}` : null
+                img_path: content.path ? `${req.protocol}://${req.get('host')}/uploads/contents/${content.path}` : null
             })),
             reviews: reviews.map(review => ({
                 id: review.id,
