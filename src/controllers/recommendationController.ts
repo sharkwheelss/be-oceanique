@@ -558,3 +558,5 @@ async function getDetailedBeachResults(connection: any, results: BeachMatch[]): 
         };
     });
 }
+
+// Function to get the details of the reviews
