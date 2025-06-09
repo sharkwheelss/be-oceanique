@@ -141,6 +141,45 @@ export interface BeachDetail extends BeachMatch {
     kota: string;
     province: string;
 }
+
+export interface ReviewContent {
+    id: number;
+    path: string;
+    img_path?: string;
+}
+
+export interface OptionVote {
+    id: number;
+    option_name: string;
+    reviews_id: number;
+}
+
+export interface UserProfile {
+    id: number;
+    path: string;
+    img_path?: string;
+}
+
+export interface ReviewDetail {
+    review_id: number;
+    user_id: number;
+    username: string;
+    join_date: number;
+    rating: number;
+    user_review: string;
+    posted: string;
+    experience: number;
+    contents: ReviewContent[];
+    option_votes: OptionVote[];
+    user_profile?: UserProfile;
+}
+
+export interface BeachReviewsResponse {
+    users_vote: number;
+    rating_average: number;
+    reviews: ReviewDetail[];
+}
+
 // Environment variables
 export interface EnvConfig {
     PORT: string;

@@ -5,6 +5,11 @@ import {
     ApiResponse,
     AuthenticatedRequest,
     BeachDetail,
+    ReviewContent,
+    OptionVote,
+    UserProfile,
+    ReviewDetail,
+    BeachReviewsResponse
 } from '../types';
 
 export const getAllBeaches = async (
@@ -154,6 +159,155 @@ export const getBeachDetails = async (
         console.error('Get beach details error:', error);
         return res.status(500).json({
             message: 'Server error retrieving beach details'
+        });
+    }
+};
+
+export const getBeachReviews = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<BeachReviewsResponse>>
+): Promise<Response> => {
+    try {
+        const { beachId } = req.params;
+        console.log(beachId)
+        if (!beachId || isNaN(Number(beachId))) {
+            return res.status(400).json({
+                message: 'Invalid beach ID provided'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        // Get users vote count
+        const [usersVoteResult] = await connection.query<RowDataPacket[]>(
+            `SELECT COUNT(*) as users_vote FROM reviews WHERE beaches_id = ?`,
+            [beachId]
+        );
+
+        // Get average rating
+        const [ratingResult] = await connection.query<RowDataPacket[]>(
+            `SELECT AVG(rating) as rating FROM reviews WHERE beaches_id = ?`,
+            [beachId]
+        );
+
+        // Get all reviews with user details
+        const [reviewsResult] = await connection.query<RowDataPacket[]>(
+            `SELECT r.id as review_id, u.id as user_id, u.username, 
+            YEAR(u.created_at) as join_date, r.rating,
+            r.user_review, DATE_FORMAT(r.created_at, '%d %M %Y') as posted,
+            COUNT(b.id) as experience
+            FROM reviews r
+            INNER JOIN users u ON u.id = r.users_id
+            INNER JOIN user_personalities up ON up.id = u.user_personality_id
+            LEFT JOIN bookings b ON b.users_id = u.id
+            WHERE r.beaches_id = ?
+            GROUP BY u.id, r.id, u.username, r.rating, r.user_review, r.created_at
+            ORDER BY r.created_at DESC`,
+            [beachId]
+        );
+
+        if (reviewsResult.length === 0) {
+            connection.release();
+            return res.status(404).json({
+                message: 'No reviews found for this beach'
+            });
+        }
+
+        // Get all review IDs and user IDs for batch queries
+        const reviewIds = reviewsResult.map(review => review.review_id);
+        const userIds = [...new Set(reviewsResult.map(review => review.user_id))];
+
+        // Get all review contents (photos/videos)
+        const [contentsResult] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM contents c 
+            WHERE c.beaches_id = ? AND c.reviews_id IN (${reviewIds.map(() => '?').join(',')})`,
+            [beachId, ...reviewIds]
+        );
+
+        // Get all option votes for reviews
+        const [optionVotesResult] = await connection.query<RowDataPacket[]>(
+            `SELECT o.id, o.name, ov.reviews_id FROM option_votes ov
+            INNER JOIN options o ON o.id = ov.options_id 
+            WHERE reviews_id IN (${reviewIds.map(() => '?').join(',')})`,
+            reviewIds
+        );
+
+        // Get user profiles
+        const [userProfilesResult] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM contents c 
+            WHERE c.profile_id IN (${userIds.map(() => '?').join(',')}) 
+            AND c.reviews_id IS NULL`,
+            userIds
+        );
+
+        connection.release();
+
+        // Group contents by review_id
+        const contentsByReview = contentsResult.reduce((acc: { [key: number]: ReviewContent[] }, content) => {
+            if (!acc[content.reviews_id]) {
+                acc[content.reviews_id] = [];
+            }
+            acc[content.reviews_id].push({
+                id: content.id,
+                path: content.path,
+                img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${content.path}`
+            });
+            return acc;
+        }, {});
+
+        // Group option votes by review_id
+        const optionVotesByReview = optionVotesResult.reduce((acc: { [key: number]: OptionVote[] }, vote) => {
+            if (!acc[vote.reviews_id]) {
+                acc[vote.reviews_id] = [];
+            }
+            acc[vote.reviews_id].push({
+                id: vote.id,
+                option_name: vote.name,
+                reviews_id: vote.reviews_id
+            });
+            return acc;
+        }, {});
+
+        // Group user profiles by user_id
+        const profilesByUser = userProfilesResult.reduce((acc: { [key: number]: UserProfile }, profile) => {
+            acc[profile.profile_id] = {
+                id: profile.id,
+                path: profile.path,
+                img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${profile.path}`
+            };
+            return acc;
+        }, {});
+
+        // Combine all data
+        const reviews: ReviewDetail[] = reviewsResult.map(review => ({
+            review_id: review.review_id,
+            user_id: review.user_id,
+            username: review.username,
+            join_date: review.join_date,
+            rating: review.rating,
+            user_review: review.user_review,
+            posted: review.posted,
+            experience: review.experience,
+            contents: contentsByReview[review.review_id] || [],
+            option_votes: optionVotesByReview[review.review_id] || [],
+            user_profile: profilesByUser[review.user_id] || undefined
+        }));
+
+        const responseData: BeachReviewsResponse = {
+            users_vote: usersVoteResult[0]?.users_vote || 0,
+            rating_average: parseFloat((parseFloat(ratingResult[0]?.rating ?? '0')).toFixed(1)),
+            reviews: reviews
+        };
+
+        return res.status(200).json({
+            message: 'Beach reviews retrieved successfully',
+            data: [responseData]
+        });
+
+    } catch (error) {
+        console.error('Get beach reviews error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving beach reviews'
         });
     }
 };
