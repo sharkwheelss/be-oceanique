@@ -209,7 +209,12 @@ export const getBeachReviews = async (
         if (reviewsResult.length === 0) {
             connection.release();
             return res.status(404).json({
-                message: 'No reviews found for this beach'
+                message: 'No reviews found for this beach',
+                data: {
+                    reviews: [],
+                    rating_average: 0,
+                    users_vote: 0
+                }
             });
         }
 
