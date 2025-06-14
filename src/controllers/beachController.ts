@@ -172,7 +172,7 @@ export const getBeachReviews = async (
 ): Promise<Response> => {
     try {
         const { beachId } = req.params;
-        console.log(beachId)
+
         if (!beachId || isNaN(Number(beachId))) {
             return res.status(400).json({
                 message: 'Invalid beach ID provided'
