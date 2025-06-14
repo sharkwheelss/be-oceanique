@@ -95,8 +95,8 @@ export interface PreferenceCategory {
 
 export interface Option {
     id: number;
-    option_text: string;
-    option_value: string;
+    option_name: string;
+    preference_categories_id: number;
 }
 
 export interface Questions {
@@ -105,10 +105,6 @@ export interface Questions {
     question_type: string;
     category: string;
     options: Option[];
-}
-
-export interface Reviews {
-
 }
 
 export interface BeachMatch {

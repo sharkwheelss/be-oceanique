@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { pool } from '../config/database';
-import { RowDataPacket } from 'mysql2';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
     ApiResponse,
     AuthenticatedRequest,
@@ -9,7 +11,8 @@ import {
     OptionVote,
     UserProfile,
     ReviewDetail,
-    BeachReviewsResponse
+    BeachReviewsResponse,
+    Option
 } from '../types';
 
 export const getAllBeaches = async (
@@ -316,3 +319,328 @@ export const getBeachReviews = async (
         });
     }
 };
+
+// Add Review API
+export const addReview = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const {
+            beachId,
+            rating,
+            comment,
+            optionVotes
+        } = req.body;
+
+        // console.log(optionVotes.optionId)
+        // Handle uploaded files
+        const files = req.files as Express.Multer.File[] | undefined;
+
+        if (!userId || !beachId || !rating) {
+            return res.status(400).json({
+                message: 'Invalid request data: userId, beachId, and rating are required'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            // Insert new review
+            const [reviewResult] = await connection.query<ResultSetHeader>(
+                `INSERT INTO reviews (users_id, beaches_id, rating, user_review) 
+                 VALUES (?, ?, ?, ?)`,
+                [userId, beachId, rating, comment]
+            );
+
+            const reviewId = reviewResult.insertId;
+
+            // Insert option votes
+            if (optionVotes && Array.isArray(optionVotes)) {
+                for (const vote of optionVotes) {
+                    await connection.query(
+                        `INSERT INTO option_votes (reviews_id, options_id) 
+                         VALUES (?, ?)`,
+                        [reviewId, vote]
+                    );
+                }
+            }
+
+            // Handle file uploads and save to contents table
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    const fileType = file.mimetype.startsWith('image/') ? 'photo' :
+                        file.mimetype.startsWith('video/') ? 'video' : 'other';
+
+                    // Step 1: Insert initial row with empty path
+                    const [contentResult] = await connection.query<ResultSetHeader>(
+                        `INSERT INTO contents (path, type, beaches_id, reviews_id) 
+                        VALUES (?, ?, ?, ?)`,
+                        ['', fileType, beachId, reviewId]
+                    );
+
+                    const contentId = contentResult.insertId;
+                    const extension = path.extname(file.originalname); // e.g., .jpg
+                    const newFilename = `${contentId}${extension}`;
+
+                    // Step 2: Rename the uploaded file in the filesystem
+                    const uploadDir = path.resolve(__dirname, '../../uploads/contents');
+
+                    const oldPath = path.join(uploadDir, file.filename);
+                    const newPath = path.join(uploadDir, newFilename);
+
+                    // Ensure directory exists (in case not created yet)
+                    if (!fs.existsSync(uploadDir)) {
+                        fs.mkdirSync(uploadDir, { recursive: true });
+                    }
+
+                    fs.renameSync(oldPath, newPath); // rename file to match contentId
+
+                    // Step 3: Update contents table with the correct path
+                    await connection.query(
+                        `UPDATE contents SET path = ? WHERE id = ?`,
+                        [newFilename, contentId]
+                    );
+                }
+            }
+
+            // Update review summary (delete previous data and recalculate)
+            await updateReviewSummary(connection, beachId);
+
+            // Update rating average in beaches table
+            await updateBeachRatingAverage(connection, beachId);
+
+            await connection.commit();
+            connection.release();
+
+            return res.status(201).json({
+                message: 'Review added successfully'
+            });
+        } catch (error) {
+            await connection.rollback();
+            connection.release();
+            throw error;
+        }
+    } catch (error) {
+        console.error('Add review error:', error);
+        return res.status(500).json({
+            message: 'Server error adding review'
+        });
+    }
+};
+
+// Edit Review API
+export const editReview = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const { reviewId } = req.params;
+        const {
+            rating,
+            comment,
+            estimatePrice,
+            optionVotes,
+            keepExistingFiles
+        } = req.body;
+
+        // Handle uploaded files
+        const files = req.files as Express.Multer.File[] | undefined;
+
+        if (!userId || !reviewId || !rating) {
+            return res.status(400).json({
+                message: 'Invalid request data: userId, reviewId, and rating are required'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            // Check if review exists and belongs to the user
+            const [existingReview] = await connection.query<RowDataPacket[]>(
+                'SELECT beaches_id FROM reviews WHERE id = ? AND users_id = ?',
+                [reviewId, userId]
+            );
+
+            if (existingReview.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(404).json({
+                    message: 'Review not found or unauthorized'
+                });
+            }
+
+            const beachId = existingReview[0].beaches_id;
+
+            // Update review
+            await connection.query(
+                `UPDATE reviews SET 
+                 rating = ?, 
+                 comment = ?, 
+                 estimate_price = ?, 
+                 updated_at = NOW() 
+                 WHERE id = ? AND users_id = ?`,
+                [rating, comment || null, estimatePrice || null, reviewId, userId]
+            );
+
+            // Delete existing option votes for this review
+            await connection.query(
+                'DELETE FROM option_votes WHERE reviews_id = ?',
+                [reviewId]
+            );
+
+            // Insert new option votes if provided
+            if (optionVotes && Array.isArray(optionVotes)) {
+                for (const vote of optionVotes) {
+                    await connection.query(
+                        `INSERT INTO option_votes (reviews_id, options_id, created_at) 
+                         VALUES (?, ?, NOW())`,
+                        [reviewId, vote.optionId]
+                    );
+                }
+            }
+
+            // Handle file management
+            if (!keepExistingFiles || keepExistingFiles === 'false') {
+                // Delete existing content files for this review if not keeping them
+                const [existingContents] = await connection.query<RowDataPacket[]>(
+                    'SELECT path FROM contents WHERE reviews_id = ?',
+                    [reviewId]
+                );
+
+                // Delete physical files
+                for (const content of existingContents) {
+                    try {
+                        const filePath = path.join(__dirname, '../uploads/contents', content.path);
+                        if (fs.existsSync(filePath)) {
+                            fs.unlinkSync(filePath);
+                        }
+                    } catch (err) {
+                        console.warn('Failed to delete file:', content.path, err);
+                    }
+                }
+
+                // Delete content records
+                await connection.query(
+                    'DELETE FROM contents WHERE reviews_id = ?',
+                    [reviewId]
+                );
+            }
+
+            // Handle new file uploads
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    const fileType = file.mimetype.startsWith('image/') ? 'photo' :
+                        file.mimetype.startsWith('video/') ? 'video' : 'other';
+
+                    await connection.query(
+                        `INSERT INTO contents (path, type, beaches_id, reviews_id) 
+                         VALUES (?, ?, ?, ?)`,
+                        [file.filename, fileType, beachId, reviewId]
+                    );
+                }
+            }
+
+            // Update review summary (delete previous data and recalculate)
+            await updateReviewSummary(connection, beachId);
+
+            // Update rating average in beaches table
+            await updateBeachRatingAverage(connection, beachId);
+
+            await connection.commit();
+            connection.release();
+
+            return res.status(200).json({
+                message: 'Review updated successfully'
+            });
+        } catch (error) {
+            await connection.rollback();
+            connection.release();
+            throw error;
+        }
+    } catch (error) {
+        console.error('Edit review error:', error);
+        return res.status(500).json({
+            message: 'Server error updating review'
+        });
+    }
+};
+
+// Helper function to update review summary
+const updateReviewSummary = async (connection: any, beachId: number): Promise<void> => {
+    // Delete existing summary data for this beach
+    await connection.query(
+        'DELETE FROM review_summary WHERE beaches_id = ?',
+        [beachId]
+    );
+
+    // Recalculate and insert new summary data
+    const [optionSummary] = await connection.query(
+        `SELECT 
+        r.beaches_id, ov.options_id,
+        COUNT(*) as total_votes
+        FROM option_votes ov
+        INNER JOIN reviews r on r.id = ov.reviews_id
+        WHERE r.beaches_id = ?
+        GROUP BY r.beaches_id, ov.options_id;`,
+        [beachId]
+    );
+
+    // Insert option votes summary
+    for (const option of optionSummary) {
+        await connection.query(
+            `INSERT INTO review_summary (beaches_id, options_id, total_votes) 
+             VALUES (?, ?, ?)`,
+            [option.beaches_id, option.options_id, option.total_votes]
+        );
+    }
+};
+
+// Helper function to update beach rating average
+const updateBeachRatingAverage = async (connection: any, beachId: number): Promise<void> => {
+    const [avgResult] = await connection.query(
+        'SELECT AVG(rating) as avg_rating FROM reviews WHERE beaches_id = ?',
+        [beachId]
+    );
+
+    const avgRating = avgResult.length > 0 ? avgResult[0].avg_rating : 0;
+
+    await connection.query(
+        'UPDATE beaches SET rating_average = ? WHERE id = ?',
+        [avgRating || 0, beachId]
+    );
+};
+
+export const getListOptions = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<Option>>
+): Promise<Response> => {
+    try {
+        const connection = await pool.getConnection();
+        const [optionData] = await connection.query<RowDataPacket[]>(
+            `SELECT id, name, preference_categories_id FROM options;`
+        );
+
+        connection.release();
+
+        if (optionData.length === 0) {
+            return res.status(404).json({ message: 'No options found' });
+        }
+
+        return res.status(200).json({
+            message: 'Options retrieved successfully',
+            data: optionData as Option[]
+        });
+    } catch (error) {
+        console.error('Get options error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving beaches'
+        });
+    }
+}

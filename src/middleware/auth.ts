@@ -5,6 +5,9 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
+import multer from 'multer';
+import * as path from 'path';
+
 
 /**
  * Authentication middleware
@@ -21,21 +24,25 @@ export const isAuthenticated = (
     return res.status(401).json({ message: 'Unauthorized: Please log in' });
 };
 
-/**
- * Optional authentication middleware
- * Adds user info to request if authenticated but doesn't block access
- */
-export const optionalAuth = (
-    req: AuthenticatedRequest,
-    res: Response,
-    next: NextFunction
-): void => {
-    if (req.session && req.session.userId) {
-        req.isAuthenticated = true;
-        req.userId = req.session.userId;
-        req.username = req.session.username;
-    } else {
-        req.isAuthenticated = false;
+export const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads/contents/');
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const extension = path.extname(file.originalname);
+        cb(null, uniqueSuffix + extension);
     }
-    next();
-};
+});
+
+export const upload = multer({
+    storage: storage,
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image and video files are allowed!') as unknown as null, false);
+
+        }
+    }
+});
