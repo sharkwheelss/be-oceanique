@@ -12,7 +12,8 @@ import {
     UserProfile,
     ReviewDetail,
     BeachReviewsResponse,
-    Option
+    Option,
+    ReviewEditData
 } from '../types';
 
 export const getAllBeaches = async (
@@ -320,6 +321,50 @@ export const getBeachReviews = async (
     }
 };
 
+export const getReviewForEdit = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<ReviewEditData>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const { reviewId } = req.params;
+
+        const connection = await pool.getConnection();
+
+        // Get review details with current option votes and files
+        const [review] = await connection.query<RowDataPacket[]>(
+            `SELECT r.id, r.rating, r.user_review, r.beaches_id,
+                    b.beach_name,
+                    GROUP_CONCAT(DISTINCT ov.options_id) as option_votes,
+                    GROUP_CONCAT(DISTINCT c.path) as path
+             FROM reviews r
+             JOIN beaches b ON r.beaches_id = b.id
+             LEFT JOIN option_votes ov ON r.id = ov.reviews_id
+             LEFT JOIN contents c ON r.id = c.reviews_id
+             WHERE r.id = ? AND r.users_id = ?
+             GROUP BY r.id;`,
+            [reviewId, userId]
+        );
+
+        if (review.length === 0) {
+            return res.status(404).json({
+                message: 'Review not found or unauthorized'
+            });
+        }
+
+        connection.release();
+        return res.status(200).json({
+            message: 'Review details retrieved successfully',
+            data: review[0]
+        });
+    } catch (error) {
+        console.error('Get review for edit error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving review'
+        });
+    }
+};
+
 // Add Review API
 export const addReview = async (
     req: AuthenticatedRequest,
@@ -443,7 +488,6 @@ export const editReview = async (
         const {
             rating,
             comment,
-            estimatePrice,
             optionVotes,
             keepExistingFiles
         } = req.body;
@@ -482,11 +526,10 @@ export const editReview = async (
             await connection.query(
                 `UPDATE reviews SET 
                  rating = ?, 
-                 comment = ?, 
-                 estimate_price = ?, 
-                 updated_at = NOW() 
+                 user_review = ?,
+                 updated_at = NOW()
                  WHERE id = ? AND users_id = ?`,
-                [rating, comment || null, estimatePrice || null, reviewId, userId]
+                [rating, comment || null, reviewId, userId]
             );
 
             // Delete existing option votes for this review
@@ -499,16 +542,16 @@ export const editReview = async (
             if (optionVotes && Array.isArray(optionVotes)) {
                 for (const vote of optionVotes) {
                     await connection.query(
-                        `INSERT INTO option_votes (reviews_id, options_id, created_at) 
-                         VALUES (?, ?, NOW())`,
-                        [reviewId, vote.optionId]
+                        `INSERT INTO option_votes (reviews_id, options_id) 
+                         VALUES (?, ?)`,
+                        [reviewId, vote]
                     );
                 }
             }
 
-            // Handle file management
-            if (!keepExistingFiles || keepExistingFiles === 'false') {
-                // Delete existing content files for this review if not keeping them
+            // Handle file management - FIXED: Only delete if explicitly told not to keep existing files
+            if (keepExistingFiles === 'false' || keepExistingFiles === false) {
+                // Only delete existing files if user explicitly chose not to keep them
                 const [existingContents] = await connection.query<RowDataPacket[]>(
                     'SELECT path FROM contents WHERE reviews_id = ?',
                     [reviewId]
@@ -517,7 +560,8 @@ export const editReview = async (
                 // Delete physical files
                 for (const content of existingContents) {
                     try {
-                        const filePath = path.join(__dirname, '../uploads/contents', content.path);
+                        const uploadDir = path.resolve(__dirname, '../../uploads/contents');
+                        const filePath = path.join(uploadDir, content.path);
                         if (fs.existsSync(filePath)) {
                             fs.unlinkSync(filePath);
                         }
@@ -533,16 +577,40 @@ export const editReview = async (
                 );
             }
 
-            // Handle new file uploads
+            // Handle new file uploads - Always add new files if provided
             if (files && files.length > 0) {
                 for (const file of files) {
                     const fileType = file.mimetype.startsWith('image/') ? 'photo' :
                         file.mimetype.startsWith('video/') ? 'video' : 'other';
 
-                    await connection.query(
+                    // Step 1: Insert initial row with empty path
+                    const [contentResult] = await connection.query<ResultSetHeader>(
                         `INSERT INTO contents (path, type, beaches_id, reviews_id) 
-                         VALUES (?, ?, ?, ?)`,
-                        [file.filename, fileType, beachId, reviewId]
+                        VALUES (?, ?, ?, ?)`,
+                        ['', fileType, beachId, reviewId]
+                    );
+
+                    const contentId = contentResult.insertId;
+                    const extension = path.extname(file.originalname); // e.g., .jpg
+                    const newFilename = `${contentId}${extension}`;
+
+                    // Step 2: Rename the uploaded file in the filesystem
+                    const uploadDir = path.resolve(__dirname, '../../uploads/contents');
+
+                    const oldPath = path.join(uploadDir, file.filename);
+                    const newPath = path.join(uploadDir, newFilename);
+
+                    // Ensure directory exists (in case not created yet)
+                    if (!fs.existsSync(uploadDir)) {
+                        fs.mkdirSync(uploadDir, { recursive: true });
+                    }
+
+                    fs.renameSync(oldPath, newPath); // rename file to match contentId
+
+                    // Step 3: Update contents table with the correct path
+                    await connection.query(
+                        `UPDATE contents SET path = ? WHERE id = ?`,
+                        [newFilename, contentId]
                     );
                 }
             }

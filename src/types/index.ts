@@ -170,6 +170,15 @@ export interface ReviewDetail {
     user_profile?: UserProfile;
 }
 
+export interface ReviewEditData {
+    id: number;
+    rating: number;
+    beaches_id: number;
+    beaches_name: string;
+    option_votes: string;
+    path: string;
+}
+
 export interface BeachReviewsResponse {
     users_vote: number;
     rating_average: number;

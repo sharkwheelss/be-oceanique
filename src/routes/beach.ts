@@ -9,7 +9,8 @@ import {
     getBeachReviews,
     addReview,
     editReview,
-    getListOptions
+    getListOptions,
+    getReviewForEdit
 } from '../controllers/beachController'
 
 const router: Router = Router();
@@ -19,6 +20,7 @@ router.get('/options', isAuthenticated, getListOptions);
 
 router.get('/:id', isAuthenticated, getBeachDetails);
 router.get('/reviews/:beachId', isAuthenticated, getBeachReviews);
+router.get('/reviews/:reviewId/edit', isAuthenticated, getReviewForEdit);
 
 router.post('/reviews', upload.array('files'), addReview);
 router.put('/reviews/:reviewId', upload.array('files'), editReview);
