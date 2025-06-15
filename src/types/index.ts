@@ -185,6 +185,26 @@ export interface BeachReviewsResponse {
     reviews: ReviewDetail[];
 }
 
+export interface EventDetail {
+    id: number;
+    name: string;
+    description: string;
+    is_active: number;
+    start_date: string;
+    end_date: string;
+    start_time: string;
+    end_time: string;
+    jenis: string;
+    beaches_id: number;
+    users_id: number;
+    beach_name?: string;
+    province?: string;
+    city?: string;
+    subdistrict?: string;
+    status: 'ongoing' | 'ended soon' | 'ended' | 'upcoming';
+    img_path?: string;
+}
+
 // Environment variables
 export interface EnvConfig {
     PORT: string;
