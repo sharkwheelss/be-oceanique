@@ -195,6 +195,7 @@ export interface EventDetail {
     start_time: string;
     end_time: string;
     jenis: string;
+    private_code?: number | null;
     beaches_id: number;
     users_id: number;
     beach_name?: string;
@@ -203,6 +204,35 @@ export interface EventDetail {
     subdistrict?: string;
     status: 'ongoing' | 'ended soon' | 'ended' | 'upcoming';
     img_path?: string;
+}
+
+export interface EventDetailWithTickets extends EventDetail {
+    tickets: TicketWithAvailability[];
+    can_purchase: boolean;
+}
+
+export interface TicketWithAvailability {
+    id: number;
+    name: string;
+    description: string;
+    quota: number;
+    price: number;
+    createat: Date;
+    updateat: Date;
+    promo_code: string | null;
+    events_id: number;
+    tickets_categories_id: number | null;
+    category: {
+        id: number;
+        name: string;
+        createat: Date;
+        updateat: Date;
+        users_id: number;
+    } | null;
+    booked_count: number;
+    remaining_tickets: number;
+    is_available: boolean;
+    is_sold_out: boolean;
 }
 
 // Environment variables

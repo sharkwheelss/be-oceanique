@@ -4,7 +4,8 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import {
     ApiResponse,
     AuthenticatedRequest,
-    EventDetail
+    EventDetail,
+    EventDetailWithTickets
 } from '../types';
 
 const getEventStatus = (startDate: string, endDate: string, isActive: number): EventDetail['status'] => {
@@ -99,6 +100,155 @@ export const getAllEvents = async (
         console.error('Get events error:', error);
         return res.status(500).json({
             message: 'Server error retrieving events'
+        });
+    }
+};
+
+export const getEventDetails = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<EventDetailWithTickets>>
+): Promise<Response> => {
+    try {
+        const { eventId } = req.params;
+
+        if (!eventId) {
+            return res.status(400).json({ message: 'Event ID is required' });
+        }
+
+        const connection = await pool.getConnection();
+
+        // Get event details with location information
+        const [eventResults] = await connection.query<RowDataPacket[]>(
+            `SELECT 
+                e.id, 
+                e.name, 
+                e.description, 
+                e.is_active, 
+                e.start_date, 
+                e.end_date, 
+                e.start_time, 
+                e.end_time, 
+                e.jenis, 
+                e.beaches_id, 
+                e.users_id,
+                b.beach_name,
+                p.name as province,
+                kk.name as city,
+                k.name as subdistrict,
+                c.path
+            FROM events e 
+            LEFT JOIN beaches b ON b.id = e.beaches_id
+            LEFT JOIN kecamatans k ON k.id = b.kecamatans_id
+            LEFT JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id
+            LEFT JOIN provinsis p ON p.id = kk.provinsis_id
+            LEFT JOIN contents c ON c.events_id = e.id
+            WHERE e.id = ?`,
+            [eventId]
+        );
+
+        if (eventResults.length === 0) {
+            connection.release();
+            return res.status(404).json({ message: 'Event not found' });
+        }
+
+        const event = eventResults[0];
+
+        // Get available tickets for this event with booking information
+        const [ticketResults] = await connection.query<RowDataPacket[]>(
+            `SELECT 
+                t.id,
+                t.name,
+                t.description,
+                t.quota,
+                t.price,
+                t.private_code,
+                t.events_id,
+                tc.id as category_id,
+                tc.name as category_name,
+                tc.users_id as category_users_id,
+                -- Calculate booked tickets from bookings table
+                COALESCE(booked_tickets.booked_count, 0) as booked_count,
+                -- Calculate remaining tickets
+                (t.quota - COALESCE(booked_tickets.booked_count, 0)) as remaining_tickets
+            FROM tickets t
+            LEFT JOIN tickets_categories tc ON tc.id = t.tickets_categories_id
+            LEFT JOIN (
+                SELECT 
+                    tickets_id,
+                    COUNT(*) as booked_count
+                FROM bookings b
+                WHERE b.status IN ('confirmed', 'pending', 'paid')
+                GROUP BY tickets_id
+            ) booked_tickets ON booked_tickets.tickets_id = t.id
+            WHERE t.events_id = ?
+            ORDER BY t.price ASC`,
+            [eventId]
+        );
+
+        connection.release();
+
+        // Determine event status
+        const eventStatus = getEventStatus(event.start_date, event.end_date, event.is_active);
+
+        // Process tickets based on event status
+        const processedTickets = ticketResults.map(ticket => {
+            const isAvailable = eventStatus !== 'ended' &&
+                ticket.remaining_tickets > 0 &&
+                event.is_active;
+
+            return {
+                id: ticket.id,
+                name: ticket.name,
+                description: ticket.description,
+                quota: ticket.quota,
+                price: ticket.price,
+                private_code: ticket.private_code !== null,
+                events_id: ticket.events_id,
+                tickets_categories_id: ticket.category_id,
+                category: ticket.category_id ? {
+                    id: ticket.category_id,
+                    name: ticket.category_name,
+                    users_id: ticket.category_users_id
+                } : null,
+                booked_count: ticket.booked_count,
+                remaining_tickets: ticket.remaining_tickets,
+                is_available: isAvailable,
+                is_sold_out: ticket.remaining_tickets <= 0
+            };
+        });
+
+        // Build response
+        const eventDetail: EventDetailWithTickets = {
+            id: event.id,
+            name: event.name,
+            description: event.description,
+            is_active: event.is_active,
+            start_date: event.start_date,
+            end_date: event.end_date,
+            start_time: event.start_time,
+            end_time: event.end_time,
+            jenis: event.jenis,
+            beaches_id: event.beaches_id,
+            users_id: event.users_id,
+            beach_name: event.beach_name,
+            province: event.province,
+            city: event.city,
+            subdistrict: event.subdistrict,
+            status: eventStatus,
+            img_path: event.path ? `${req.protocol}://${req.get('host')}/uploads/contents/${event.path}` : undefined,
+            tickets: processedTickets,
+            can_purchase: eventStatus !== 'ended' && event.is_active && processedTickets.some(t => t.is_available)
+        };
+
+        return res.status(200).json({
+            message: 'Event details retrieved successfully',
+            data: [eventDetail]
+        });
+
+    } catch (error) {
+        console.error('Get event details error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving event details'
         });
     }
 };
