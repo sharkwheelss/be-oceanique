@@ -217,8 +217,7 @@ export interface TicketWithAvailability {
     description: string;
     quota: number;
     price: number;
-    createat: Date;
-    updateat: Date;
+    date: Date;
     promo_code: string | null;
     events_id: number;
     tickets_categories_id: number | null;
