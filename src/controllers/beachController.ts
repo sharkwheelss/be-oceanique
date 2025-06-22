@@ -712,3 +712,33 @@ export const getListOptions = async (
         });
     }
 }
+
+export const getAllWishlist = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+
+        const connection = await pool.getConnection();
+
+        // Get all wishlists for the user with beach details
+        const [wishlists] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM wishlists w
+            INNER JOIN beaches b ON w.beaches_id = b.id
+            WHERE w.users_id = ?;`,
+            [userId]
+        );
+
+        connection.release();
+        return res.status(200).json({
+            message: 'Wishlists retrieved successfully',
+            data: wishlists
+        });
+    } catch (error) {
+        console.error('Get all wishlists error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving wishlists'
+        });
+    }
+};

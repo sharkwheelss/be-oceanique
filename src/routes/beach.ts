@@ -10,13 +10,15 @@ import {
     addReview,
     editReview,
     getListOptions,
-    getReviewForEdit
+    getReviewForEdit,
+    getAllWishlist
 } from '../controllers/beachController'
 
 const router: Router = Router();
 
 router.get('/all', isAuthenticated, getAllBeaches);
 router.get('/options', isAuthenticated, getListOptions);
+router.get('/wishlist', isAuthenticated, getAllWishlist);
 
 router.get('/:id', isAuthenticated, getBeachDetails);
 router.get('/reviews/:beachId', isAuthenticated, getBeachReviews);
