@@ -185,7 +185,7 @@ export interface BeachReviewsResponse {
     reviews: ReviewDetail[];
 }
 
-export interface EventDetail {
+export interface EventDetail extends AdminAccountNumber {
     id: number;
     name: string;
     description: string;
@@ -197,7 +197,7 @@ export interface EventDetail {
     jenis: string;
     private_code?: number | null;
     beaches_id: number;
-    users_id: number;
+    heled_by: string;
     beach_name?: string;
     province?: string;
     city?: string;
@@ -232,6 +232,12 @@ export interface TicketWithAvailability {
     remaining_tickets: number;
     is_available: boolean;
     is_sold_out: boolean;
+}
+
+export interface AdminAccountNumber {
+    bank_name: string;
+    account_number: number;
+    account_name: string;
 }
 
 // Environment variables

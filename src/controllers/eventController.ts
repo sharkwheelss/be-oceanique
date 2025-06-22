@@ -1,11 +1,13 @@
 import { Response } from 'express';
 import { pool } from '../config/database';
+import * as path from 'path';
+import * as fs from 'fs';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import {
     ApiResponse,
     AuthenticatedRequest,
     EventDetail,
-    EventDetailWithTickets
+    EventDetailWithTickets,
 } from '../types';
 
 const getEventStatus = (startDate: string, endDate: string, isActive: number): EventDetail['status'] => {
@@ -131,6 +133,7 @@ export const getEventDetails = async (
                 e.jenis, 
                 e.beaches_id, 
                 e.users_id,
+                u.username as held_by,
                 b.beach_name,
                 p.name as province,
                 kk.name as city,
@@ -142,6 +145,7 @@ export const getEventDetails = async (
             LEFT JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id
             LEFT JOIN provinsis p ON p.id = kk.provinsis_id
             LEFT JOIN contents c ON c.events_id = e.id
+            LEFT JOIN users u on u.id = e.users_id
             WHERE e.id = ?`,
             [eventId]
         );
@@ -184,6 +188,11 @@ export const getEventDetails = async (
             WHERE t.events_id = ?
             ORDER BY t.price ASC`,
             [eventId]
+        );
+
+        const [bankAccount] = await connection.query<RowDataPacket[]>(
+            `SELECT bank_name, account_number, account_name FROM users WHERE id = ?;`,
+            [event.users_id]
         );
 
         connection.release();
@@ -231,7 +240,7 @@ export const getEventDetails = async (
             end_time: event.end_time,
             jenis: event.jenis,
             beaches_id: event.beaches_id,
-            users_id: event.users_id,
+            held_by: event.held_by,
             beach_name: event.beach_name,
             province: event.province,
             city: event.city,
@@ -239,7 +248,10 @@ export const getEventDetails = async (
             status: eventStatus,
             img_path: event.path ? `${req.protocol}://${req.get('host')}/uploads/contents/${event.path}` : undefined,
             tickets: processedTickets,
-            can_purchase: eventStatus !== 'ended' && event.is_active && processedTickets.some(t => t.is_available)
+            can_purchase: eventStatus !== 'ended' && event.is_active && processedTickets.some(t => t.is_available),
+            bank_name: bankAccount[0].bank_name,
+            account_number: bankAccount[0].account_number,
+            account_name: bankAccount[0].account_name
         };
 
         return res.status(200).json({
@@ -251,6 +263,169 @@ export const getEventDetails = async (
         console.error('Get event details error:', error);
         return res.status(500).json({
             message: 'Server error retrieving event details'
+        });
+    }
+};
+
+// New Bookings API
+export const newBookings = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const {
+            paymentMethod,
+            status,
+            totalPayment,
+            tickets
+        } = req.body;
+
+        // Handle uploaded payment evidence file
+        const files = req.files as Express.Multer.File[] | undefined;
+
+        if (!userId) {
+            return res.status(400).json({
+                message: 'Invalid request data: userId is required'
+            });
+        }
+        let ticketsData = tickets;
+
+        if (typeof ticketsData === 'string') {
+            try {
+                ticketsData = JSON.parse(ticketsData);
+            } catch {
+                return res.status(400).json({ message: 'Invalid tickets JSON' });
+            }
+        }
+
+        if (!ticketsData || !Array.isArray(ticketsData) || ticketsData.length === 0) {
+            return res.status(400).json({
+                message: 'Tickets array is required and must contain at least one ticket'
+            });
+        }
+
+        if (!files || files.length === 0) {
+            return res.status(400).json({
+                message: 'Payment evidence file is required'
+            });
+        }
+
+        // Validate that only one file is uploaded (payment evidence)
+        if (files.length > 1) {
+            return res.status(400).json({
+                message: 'Only one payment evidence file is allowed'
+            });
+        }
+
+        const paymentFile = files[0];
+
+        // Validate file type (should be image for payment evidence)
+        if (!paymentFile.mimetype.startsWith('image/')) {
+            return res.status(400).json({
+                message: 'Payment evidence must be an image file'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            // Generate unique booking ID using current timestamp
+            const groupBookingId = Date.now().toString();
+
+            // Insert individual booking records for each ticket
+            for (const ticket of ticketsData) {
+                const { ticketId, quantity, subTotal } = ticket;
+
+                await connection.query(
+                    `INSERT INTO bookings (
+            group_booking_id,
+            total_tickets,
+            subtotal,
+            status,
+            payment_method,
+            total_payment,
+            users_id,
+            tickets_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        groupBookingId,
+                        quantity,           // total quantity for this ticketId
+                        subTotal,
+                        status,
+                        paymentMethod,
+                        totalPayment,
+                        userId,
+                        ticketId
+                    ]
+                );
+            }
+
+            // Handle payment evidence file upload (one per booking, not per ticket)
+            const fileType = 'photo'; // Payment evidence is always a photo
+
+            // Step 1: Insert initial row with empty path in contents table
+            const [contentResult] = await connection.query<ResultSetHeader>(
+                `INSERT INTO contents (path, type, group_booking_id) 
+                VALUES (?, ?, ?)`,
+                ['', fileType, groupBookingId]
+            );
+
+            const contentId = contentResult.insertId;
+            const extension = path.extname(paymentFile.originalname); // e.g., .jpg
+            const newFilename = `${contentId}${extension}`;
+
+            // Step 2: Rename the uploaded file in the filesystem
+            const uploadDir = path.resolve(__dirname, '../../uploads/contents');
+
+            const oldPath = path.join(uploadDir, paymentFile.filename);
+            const newPath = path.join(uploadDir, newFilename);
+
+            // Ensure directory exists (in case not created yet)
+            if (!fs.existsSync(uploadDir)) {
+                fs.mkdirSync(uploadDir, { recursive: true });
+            }
+
+            fs.renameSync(oldPath, newPath); // rename file to match contentId
+
+            // Step 3: Update contents table with the correct path
+            await connection.query(
+                `UPDATE contents SET path = ? WHERE id = ?`,
+                [newFilename, contentId]
+            );
+
+            // get the inserted booking
+            const [bookingResult] = await connection.query<RowDataPacket[]>(
+                `SELECT * FROM bookings WHERE group_booking_id = ?`,
+                [groupBookingId]
+            );
+
+            await connection.commit();
+            connection.release();
+
+            // Calculate total tickets for response
+            const totalTickets = ticketsData.reduce((sum, ticket) => sum + ticket.quantity, 0);
+
+            return res.status(201).json({
+                message: `Booking created successfully with ${totalTickets} tickets and payment evidence`,
+                data: {
+                    groupBookingId: groupBookingId,
+                    bookingResult: bookingResult,
+                }
+            });
+
+        } catch (error) {
+            await connection.rollback();
+            connection.release();
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('New booking error:', error);
+        return res.status(500).json({
+            message: 'Server error creating booking'
         });
     }
 };
