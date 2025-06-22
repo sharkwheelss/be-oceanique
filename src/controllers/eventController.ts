@@ -429,3 +429,44 @@ export const newBookings = async (
         });
     }
 };
+
+export const getAllTransactions = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+
+        if (!userId) {
+            return res.status(401).json({
+                message: 'User not authenticated'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        const [transactions] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM bookings WHERE users_id = ?`,
+            [userId]
+        );
+
+        connection.release();
+
+        if (transactions.length === 0) {
+            return res.status(404).json({
+                message: 'No transactions found'
+            });
+        }
+
+        return res.status(200).json({
+            message: 'Transactions retrieved successfully',
+            data: transactions
+        });
+
+    } catch (error) {
+        console.error('Get transactions error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving transactions'
+        });
+    }
+};

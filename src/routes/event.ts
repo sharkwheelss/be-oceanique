@@ -6,12 +6,14 @@ import {
 import {
     getAllEvents,
     getEventDetails,
-    newBookings
+    newBookings,
+    getAllTransactions
 } from '../controllers/eventController';
 
 const router: Router = Router();
 
 router.get('/all', isAuthenticated, getAllEvents);
+router.get('/transaction-history', isAuthenticated, getAllTransactions)
 
 
 router.get('/:eventId', isAuthenticated, getEventDetails);
