@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { pool } from '../config/database';
+import { validationResult } from "express-validator";
 import * as path from 'path';
 import * as fs from 'fs';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
@@ -182,7 +183,7 @@ export const getEventDetails = async (
                     tickets_id,
                     COUNT(*) as booked_count
                 FROM bookings b
-                WHERE b.status IN ('confirmed', 'pending', 'paid')
+                WHERE b.status IN ('approved', 'pending', 'rejected')
                 GROUP BY tickets_id
             ) booked_tickets ON booked_tickets.tickets_id = t.id
             WHERE t.events_id = ?
@@ -468,5 +469,40 @@ export const getAllTransactions = async (
         return res.status(500).json({
             message: 'Server error retrieving transactions'
         });
+    }
+};
+
+export const verifyPrivateCode = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                message: "Validation failed",
+                errors: errors.array(),
+            });
+        }
+        const { privateCode, ticketId } = req.body;
+
+        const connection = await pool.getConnection();
+        const [results] = await connection.query<RowDataPacket[]>(
+            "SELECT * FROM tickets WHERE private_code = ? AND id = ?",
+            [privateCode.trim(), ticketId]
+        );
+        connection.release();
+
+        if (results.length === 0) {
+            return res.status(404).json({ message: "Invalid private code" });
+        }
+        else {
+            return res.status(200).json({
+                message: "Private code is valid",
+            });
+        }
+    } catch (error) {
+        console.error("Error verifying private code:", error);
+        return res.status(500).json({ message: "Server error verifying private code" });
     }
 };

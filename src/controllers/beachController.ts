@@ -115,12 +115,18 @@ export const getBeachDetails = async (
             [id]
         );
 
+        const [countReviews] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM reviews WHERE beaches_id = ?;`,
+            [id]
+        );
+
         connection.release();
 
         // Structure the response with grouped sections
         const beach = {
             ...(beachDetails[0] as BeachDetail),
             img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${beachDetails[0].path}`,
+            count_reviews: countReviews.length,
             activities: activities.map(activity => ({
                 id: activity.id,
                 option_id: activity.options_id,
@@ -150,8 +156,8 @@ export const getBeachDetails = async (
                 created_at: review.created_at,
                 updated_at: review.updated_at,
                 // Include option votes data
-                option_vote_id: review.option_vote_id || review.id, // Adjust based on your schema
-                votes: review.votes || review.rating // Adjust based on your option_votes structure
+                option_vote_id: review.option_vote_id || review.id,
+                votes: review.votes || review.rating
             }))
         };
 
@@ -742,3 +748,4 @@ export const getAllWishlist = async (
         });
     }
 };
+

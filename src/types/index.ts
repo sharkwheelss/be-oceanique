@@ -24,6 +24,7 @@ export interface UserResponse {
     address?: string;
     user_types_id: number;
     user_personality_id?: number | null;
+    imgProfile?: string | null;
 }
 
 export interface SignupRequest {
@@ -46,6 +47,7 @@ export interface SessionData extends Session {
     address?: string;
     userTypesId?: number;
     userPersonalityId?: number;
+    imgProfile?: string;
 }
 
 // Extended Request interface with session

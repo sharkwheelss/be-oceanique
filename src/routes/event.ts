@@ -7,7 +7,8 @@ import {
     getAllEvents,
     getEventDetails,
     newBookings,
-    getAllTransactions
+    getAllTransactions,
+    verifyPrivateCode
 } from '../controllers/eventController';
 
 const router: Router = Router();
@@ -19,6 +20,7 @@ router.get('/transaction-history', isAuthenticated, getAllTransactions)
 router.get('/:eventId', isAuthenticated, getEventDetails);
 
 router.post('/booking', upload.array('files'), newBookings);
+router.post('/verify-private-code', isAuthenticated, verifyPrivateCode);
 
 
 export default router;

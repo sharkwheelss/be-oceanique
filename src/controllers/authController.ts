@@ -119,6 +119,11 @@ export const signin = async (
             [login, login]
         );
 
+        const [imgProfile] = await connection.query<RowDataPacket[]>(
+            'SELECT * FROM contents WHERE profile_id = ?',
+            [users[0]?.id]
+        );
+
         connection.release();
 
         if (users.length === 0) {
@@ -140,6 +145,7 @@ export const signin = async (
         req.session.email = user.email;
         req.session.userTypesId = user.user_types_id;
         req.session.userPersonalityId = user.user_personality_id;
+        req.session.imgProfile = `${req.protocol}://${req.get('host')}/uploads/contents/${imgProfile[0].path}`
 
         // Create a simple session identifier as token
         const token = req.session.id;
@@ -152,13 +158,14 @@ export const signin = async (
         // Return success response (without sensitive information)
         return res.status(200).json({
             message: 'Authentication successful',
-            token,
+            // token,
             user: {
                 id: user.id,
                 username: user.username,
                 email: user.email,
                 user_types_id: user.user_types_id,
-                user_personality_id: user.user_personality_id
+                user_personality_id: user.user_personality_id,
+                imgProfile: `${req.protocol}://${req.get('host')}/uploads/contents/${imgProfile[0].path}`
             }
         });
     } catch (error) {
@@ -239,7 +246,8 @@ export const checkAuth = (
                 email: req.session.email || '',
                 address: req.session.address || '',
                 user_types_id: req.session.userTypesId || 1,
-                user_personality_id: req.session.userPersonalityId || null
+                user_personality_id: req.session.userPersonalityId || null,
+                imgProfile: req.session.imgProfile || null
             }
         });
     }

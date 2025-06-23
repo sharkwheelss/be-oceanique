@@ -11,7 +11,7 @@ import {
     editReview,
     getListOptions,
     getReviewForEdit,
-    getAllWishlist
+    getAllWishlist,
 } from '../controllers/beachController'
 
 const router: Router = Router();

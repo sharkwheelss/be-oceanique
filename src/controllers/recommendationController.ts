@@ -517,6 +517,8 @@ function calculateBeachMatches(
 // Helper function to get detailed beach results
 async function getDetailedBeachResults(connection: any, results: BeachMatch[]): Promise<BeachDetail[]> {
     const beachIds = results.map(result => result.beach_id);
+
+    // Constructs a placeholders string like ?, ?, ? for the SQL IN clause.
     const placeholders = beachIds.map(() => '?').join(',');
 
     const [beachDetails] = await connection.query(
@@ -536,6 +538,8 @@ async function getDetailedBeachResults(connection: any, results: BeachMatch[]): 
     beachDetails.forEach((beach: BeachDetail) => {
         beachDetailsMap[beach.id] = beach;
     });
+
+    // console.log('Beach details map:', beachDetailsMap);
 
     // Combine match results with beach details
     return results.map(result => {
@@ -558,5 +562,3 @@ async function getDetailedBeachResults(connection: any, results: BeachMatch[]): 
         };
     });
 }
-
-// Function to get the details of the reviews
