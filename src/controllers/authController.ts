@@ -36,7 +36,7 @@ export const signup = async (
             });
         }
 
-        const { username, email, password }: SignupRequest = req.body;
+        const { username, email, password, userTypesId }: SignupRequest = req.body;
 
         // Check if the username or email already exists
         const connection = await pool.getConnection();
@@ -55,10 +55,6 @@ export const signup = async (
         // Hash the password
         const saltRounds = 10;
         const hashedPassword: string = await bcrypt.hash(password, saltRounds);
-
-        // Insert the new user into the database
-        // Get user_types_id from request body or determine it based on the registration endpoint
-        const userTypesId = req.body.userTypesId || req.query.userType || 1; // Default to 1 if not specified
 
         // Validate user type is within allowed range
         if (![1, 2, 3].includes(userTypesId)) {
@@ -123,6 +119,7 @@ export const signin = async (
             'SELECT * FROM contents WHERE profile_id = ?',
             [users[0]?.id]
         );
+        console.log('imgProfile', imgProfile);
 
         connection.release();
 
@@ -139,13 +136,18 @@ export const signin = async (
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
+        const profileImgPath =
+            imgProfile.length > 0 && imgProfile[0].path
+                ? `${req.protocol}://${req.get('host')}/uploads/contents/${imgProfile[0].path}`
+                : `${req.protocol}://${req.get('host')}/uploads/contents/placeholder-profile.png`;
+
         // Create a session for the authenticated user
         req.session.userId = user.id;
         req.session.username = user.username;
         req.session.email = user.email;
         req.session.userTypesId = user.user_types_id;
         req.session.userPersonalityId = user.user_personality_id;
-        req.session.imgProfile = `${req.protocol}://${req.get('host')}/uploads/contents/${imgProfile[0].path}`
+        req.session.imgProfile = profileImgPath;
 
         // Create a simple session identifier as token
         const token = req.session.id;
@@ -165,7 +167,7 @@ export const signin = async (
                 email: user.email,
                 user_types_id: user.user_types_id,
                 user_personality_id: user.user_personality_id,
-                imgProfile: `${req.protocol}://${req.get('host')}/uploads/contents/${imgProfile[0].path}`
+                imgProfile: profileImgPath
             }
         });
     } catch (error) {
