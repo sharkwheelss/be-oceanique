@@ -12,7 +12,7 @@ import { initDatabase, dbConfig } from './config/database';
 import authRoutes from './routes/auth';
 import recommendationRoutes from './routes/recommendation';
 import beachRoutes from './routes/beach';
-import eventRoutes from './routes/event'
+import eventRoutes from './routes/event';
 import path from 'path';
 
 // Load environment variables
