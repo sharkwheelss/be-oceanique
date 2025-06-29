@@ -513,3 +513,222 @@ export const deleteTicket = async (
         });
     }
 };
+
+// TRANSACTION REPORT SECTION
+// Get Bookings List
+export const getBookingsList = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const connection = await pool.getConnection();
+
+        const [bookings] = await connection.query<RowDataPacket[]>(
+            `SELECT 
+                b.group_booking_id,
+                MIN(b.booked_at) AS booked_at,
+                u.username AS booked_by,
+                MIN(b.payment_method) AS payment_method,
+                SUM(b.subtotal) AS total_payment,
+                SUM(b.total_tickets) AS total_tickets,
+                MIN(b.status) AS status
+            FROM bookings b
+            INNER JOIN tickets t ON t.id = b.tickets_id
+            INNER JOIN users u ON u.id = b.users_id
+            WHERE t.users_id = ?
+            GROUP BY b.group_booking_id, u.username
+            ORDER BY booked_at DESC;`,
+            [userId]
+        );
+
+        connection.release();
+
+        const bookingsList = bookings.map(booking => ({
+            id: booking.id,
+            group_booking_id: booking.group_booking_id,
+            booked_at: booking.booked_at,
+            booked_by: booking.booked_by,
+            payment_method: booking.payment_method,
+            total_payment: booking.total_payment,
+            total_tickets: booking.total_tickets,
+            status: booking.status,
+        }));
+
+        return res.status(200).json({
+            message: 'Bookings list retrieved successfully',
+            data: bookingsList
+        });
+    } catch (error) {
+        console.error('Get bookings list error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving bookings list'
+        });
+    }
+};
+
+// Get Booking Details
+export const getBookingDetails = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const { id } = req.params;
+
+        const connection = await pool.getConnection();
+
+        // Get main booking details
+        const [bookingDetails] = await connection.query<RowDataPacket[]>(
+            `SELECT 
+                b.id,
+                b.group_booking_id,
+                b.booked_at,
+                u.username as booked_by,
+                b.payment_method,
+                b.total_payment,
+                b.total_tickets,
+                b.status,
+                b.rejection_reason,
+                c.path as payment_evidence
+            FROM bookings b
+            LEFT JOIN contents c ON c.group_booking_id = b.group_booking_id
+            INNER JOIN users u ON u.id = b.users_id
+            WHERE b.group_booking_id = ?`,
+            [id]
+        );
+
+        if (!bookingDetails.length) {
+            connection.release();
+            return res.status(404).json({ message: 'Booking not found' });
+        }
+
+        // Get ticket details for this booking
+        const [ticketDetails] = await connection.query<RowDataPacket[]>(
+            `SELECT 
+                b.id as booking_id,
+                t.name as ticket_name,
+                tc.name as category,
+                t.price,
+                b.total_tickets,
+                (t.price * b.total_tickets) as subtotal
+            FROM tickets t
+            INNER JOIN tickets_categories tc ON tc.id = t.tickets_categories_id
+            INNER JOIN bookings b ON b.tickets_id = t.id
+            WHERE b.group_booking_id = ?`,
+            [id]
+        );
+
+        connection.release();
+
+        const booking = bookingDetails[0];
+
+        // Structure the response
+        const bookingDetail = {
+            id: booking.id,
+            group_booking_id: booking.group_booking_id,
+            booked_at: booking.booked_at,
+            booked_by: booking.booked_by,
+            payment_method: booking.payment_method,
+            total_payment: booking.total_payment,
+            total_tickets: booking.total_tickets,
+            status: booking.status,
+            rejection_reason: booking.rejection_reason,
+            payment_evidence_path: `${req.protocol}://${req.get('host')}/uploads/contents/${booking.payment_evidence}`,
+            ticket_details: ticketDetails.map(ticket => ({
+                booking_id: ticket.booking_id,
+                ticket_name: ticket.ticket_name,
+                category: ticket.category,
+                price: ticket.price,
+                total_tickets: ticket.total_tickets,
+                subtotal: ticket.subtotal
+            }))
+        };
+
+        return res.status(200).json({
+            message: 'Booking details retrieved successfully',
+            data: [bookingDetail]
+        });
+    } catch (error) {
+        console.error('Get booking details error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving booking details'
+        });
+    }
+};
+
+// Update Booking Status
+export const updateBookingStatus = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const { id } = req.params;
+        const { status, rejection_reason } = req.body;
+
+        // Validate required fields
+        if (!status) {
+            return res.status(400).json({
+                message: 'Status is required'
+            });
+        }
+
+        // Validate status values
+        const validStatuses = ['pending', 'approved', 'rejected'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                message: 'Invalid status. Must be one of: pending, approved, rejected'
+            });
+        }
+
+        // If status is Rejected, rejection_reason is required
+        if (status === 'rejected' && !rejection_reason) {
+            return res.status(400).json({
+                message: 'Rejection reason is required when status is rejected'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        // Check if booking exists
+        const [existingBooking] = await connection.query<RowDataPacket[]>(
+            `SELECT group_booking_id FROM bookings WHERE group_booking_id = ?`,
+            [id]
+        );
+
+        if (!existingBooking.length) {
+            connection.release();
+            return res.status(404).json({ message: 'Booking not found' });
+        }
+
+        // Update booking status
+        const updateFields = ['status = ?'];
+        const updateValues = [status];
+
+        if (status === 'rejected' && rejection_reason) {
+            updateFields.push('rejection_reason = ?');
+            updateValues.push(rejection_reason);
+        } else if (status !== 'rejected') {
+            updateFields.push('rejection_reason = NULL');
+        }
+
+        // Add updated timestamp
+        updateFields.push('updated_at = NOW()');
+        updateValues.push(id);
+
+        await connection.query(
+            `UPDATE bookings SET ${updateFields.join(', ')} WHERE group_booking_id = ?`,
+            updateValues
+        );
+
+        connection.release();
+
+        return res.status(200).json({
+            message: `Booking status updated to ${status} successfully`,
+        });
+    } catch (error) {
+        console.error('Update booking status error:', error);
+        return res.status(500).json({
+            message: 'Server error updating booking status'
+        });
+    }
+};
