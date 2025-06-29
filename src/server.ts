@@ -13,6 +13,7 @@ import authRoutes from './routes/auth';
 import recommendationRoutes from './routes/recommendation';
 import beachRoutes from './routes/beach';
 import eventRoutes from './routes/event';
+import ticketRoutes from './routes/ticket';
 import path from 'path';
 
 // Load environment variables
@@ -55,6 +56,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/recommendations', recommendationRoutes)
 app.use('/api/beaches', beachRoutes)
 app.use('/api/events', eventRoutes)
+app.use('/api/tickets', ticketRoutes)
 
 // Serve static files from the 'public' directory
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

@@ -116,6 +116,7 @@ export const getEventsList = async (
     res: Response<ApiResponse<any>>
 ): Promise<Response> => {
     try {
+        const userId = req.session.userId;
         const connection = await pool.getConnection();
 
         try {
@@ -124,7 +125,9 @@ export const getEventsList = async (
                         CONCAT(e.end_date,' ', e.end_time) as end_datetime, e.jenis, b.beach_name
                  FROM events e 
                  INNER JOIN beaches b ON e.beaches_id = b.id
-                 ORDER BY e.start_date DESC, e.start_time DESC`
+                 WHERE e.users_id = ?
+                 ORDER BY e.start_date DESC, e.start_time DESC`,
+                [userId]
             );
 
             connection.release();
