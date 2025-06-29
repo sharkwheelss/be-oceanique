@@ -14,7 +14,8 @@ export const dbConfig: DatabaseConfig = {
     database: process.env.DB_NAME || 'db_oceanique',
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    decimalNumbers: true,
 };
 
 // Create the MySQL connection pool

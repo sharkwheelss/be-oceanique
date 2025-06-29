@@ -254,16 +254,26 @@ export const getTickets = async (
     res: Response<ApiResponse<any>>
 ): Promise<Response> => {
     try {
+        const userId = req.session.userId;
         const connection = await pool.getConnection();
 
         try {
             const [tickets] = await connection.query<RowDataPacket[]>(
                 `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
-                        t.printers_code, t.events_id, t.tickets_category_id,
-                        tc.name as category_name
+                        t.private_code, tc.name as category_name, e.name as event_name,
+                (
+                    SELECT COALESCE(SUM(b.total_tickets), 0) * 1
+                    FROM bookings b
+                    WHERE 
+                        b.tickets_id = t.id 
+                        AND b.status IN ('approved', 'pending')
+                    ) AS sold
                  FROM tickets t
-                 LEFT JOIN tickets_categories tc ON t.tickets_category_id = tc.id
-                 ORDER BY t.date DESC, t.name ASC`
+                 INNER JOIN tickets_categories tc ON t.tickets_categories_id = tc.id
+                 INNER JOIN events e ON e.id = t.events_id
+                 WHERE t.users_id = ?
+                 ORDER BY t.id DESC;`,
+                [userId]
             );
 
             connection.release();
@@ -284,44 +294,6 @@ export const getTickets = async (
     }
 };
 
-// GET tickets by event ID
-export const getTicketsByEvent = async (
-    req: AuthenticatedRequest,
-    res: Response<ApiResponse<any>>
-): Promise<Response> => {
-    try {
-        const { eventId } = req.params;
-        const connection = await pool.getConnection();
-
-        try {
-            const [tickets] = await connection.query<RowDataPacket[]>(
-                `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
-                        t.printers_code, t.events_id, t.tickets_category_id,
-                        tc.name as category_name
-                 FROM tickets t
-                 LEFT JOIN tickets_categories tc ON t.tickets_category_id = tc.id
-                 WHERE t.events_id = ?
-                 ORDER BY t.date ASC, t.name ASC`,
-                [eventId]
-            );
-
-            connection.release();
-
-            return res.status(200).json({
-                message: 'Event tickets retrieved successfully',
-                data: tickets
-            });
-        } catch (error) {
-            connection.release();
-            throw error;
-        }
-    } catch (error) {
-        console.error('Get tickets by event error:', error);
-        return res.status(500).json({
-            message: 'Server error retrieving event tickets'
-        });
-    }
-};
 
 // GET single ticket by ID
 export const getTicketById = async (
@@ -329,18 +301,36 @@ export const getTicketById = async (
     res: Response<ApiResponse<any>>
 ): Promise<Response> => {
     try {
+        const userId = req.session.userId;
         const { id } = req.params;
         const connection = await pool.getConnection();
 
         try {
             const [tickets] = await connection.query<RowDataPacket[]>(
-                `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
-                        t.printers_code, t.events_id, t.tickets_category_id,
-                        tc.name as category_name
-                 FROM tickets t
-                 LEFT JOIN tickets_categories tc ON t.tickets_category_id = tc.id
-                 WHERE t.id = ?`,
-                [id]
+                `SELECT 
+                t.id, 
+                t.name, 
+                t.description, 
+                t.quota, 
+                t.price, 
+                t.date, 
+                t.private_code, 
+                tc.name AS category_name, 
+                e.name AS event_name,
+                (
+                    SELECT COALESCE(SUM(b.total_tickets), 0) * 1
+                    FROM bookings b
+                    WHERE 
+                        b.tickets_id = t.id 
+                        AND b.status IN ('approved', 'pending')
+                    ) AS sold
+                FROM tickets t
+                INNER JOIN tickets_categories tc ON t.tickets_categories_id = tc.id
+                INNER JOIN events e ON e.id = t.events_id
+                WHERE t.id = ? AND t.users_id = ?
+                ORDER BY t.id DESC;
+                `,
+                [id, userId]
             );
 
             connection.release();
@@ -373,7 +363,8 @@ export const createTicket = async (
     res: Response<ApiResponse<any>>
 ): Promise<Response> => {
     try {
-        const { name, description, quota, price, date, printers_code, events_id, tickets_category_id } = req.body;
+        const userId = req.session.userId;
+        const { name, description, quota, price, date, private_code, events_id, tickets_categories_id } = req.body;
 
         // Validation
         if (!name || !quota || !price || !date || !events_id) {
@@ -386,18 +377,18 @@ export const createTicket = async (
 
         try {
             const [result] = await connection.query<ResultSetHeader>(
-                `INSERT INTO tickets (name, description, quota, price, date, printers_code, events_id, tickets_category_id) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [name, description, quota, price, date, printers_code, events_id, tickets_category_id]
+                `INSERT INTO tickets (name, description, quota, price, date, private_code, events_id, tickets_categories_id, users_id) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [name, description, quota, price, date, private_code, events_id, tickets_categories_id, userId]
             );
 
             // Get the created ticket with category info
             const [createdTicket] = await connection.query<RowDataPacket[]>(
-                `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
-                        t.printers_code, t.events_id, t.tickets_category_id,
-                        tc.name as category_name
+                `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, t.users_id,
+                        t.private_code, e.name, tc.name as category_name
                  FROM tickets t
-                 LEFT JOIN tickets_categories tc ON t.tickets_category_id = tc.id
+                 INNER JOIN tickets_categories tc ON t.tickets_categories_id = tc.id
+                 INNER JOIN events e ON e.id = t.events_id
                  WHERE t.id = ?`,
                 [result.insertId]
             );
@@ -426,8 +417,9 @@ export const updateTicket = async (
     res: Response<ApiResponse<any>>
 ): Promise<Response> => {
     try {
+        const userId = req.session.userId;
         const { id } = req.params;
-        const { name, description, quota, price, date, printers_code, events_id, tickets_category_id } = req.body;
+        const { name, description, quota, price, date, private_code, events_id, tickets_categories_id } = req.body;
 
         // Validation
         if (!name || !quota || !price || !date || !events_id) {
@@ -442,9 +434,9 @@ export const updateTicket = async (
             const [result] = await connection.query<ResultSetHeader>(
                 `UPDATE tickets 
                  SET name = ?, description = ?, quota = ?, price = ?, date = ?, 
-                     printers_code = ?, events_id = ?, tickets_category_id = ?
-                 WHERE id = ?`,
-                [name, description, quota, price, date, printers_code, events_id, tickets_category_id, id]
+                     private_code = ?, events_id = ?, tickets_categories_id = ?
+                 WHERE id = ? AND users_id = ?`,
+                [name, description, quota, price, date, private_code, events_id, tickets_categories_id, id, userId]
             );
 
             if (result.affectedRows === 0) {
@@ -457,10 +449,10 @@ export const updateTicket = async (
             // Get the updated ticket with category info
             const [updatedTicket] = await connection.query<RowDataPacket[]>(
                 `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
-                        t.printers_code, t.events_id, t.tickets_category_id,
-                        tc.name as category_name
+                        t.private_code, e.name, tc.name as category_name
                  FROM tickets t
-                 LEFT JOIN tickets_categories tc ON t.tickets_category_id = tc.id
+                 INNER JOIN tickets_categories tc ON t.tickets_categories_id = tc.id
+                 INNER JOIN events e ON e.id = t.events_id
                  WHERE t.id = ?`,
                 [id]
             );
@@ -489,13 +481,14 @@ export const deleteTicket = async (
     res: Response<ApiResponse<any>>
 ): Promise<Response> => {
     try {
+        const userId = req.session.userId;
         const { id } = req.params;
         const connection = await pool.getConnection();
 
         try {
             const [result] = await connection.query<ResultSetHeader>(
-                `DELETE FROM tickets WHERE id = ?`,
-                [id]
+                `DELETE FROM tickets WHERE id = ? AND users_id = ?`,
+                [id, userId]
             );
 
             connection.release();
@@ -517,45 +510,6 @@ export const deleteTicket = async (
         console.error('Delete ticket error:', error);
         return res.status(500).json({
             message: 'Server error deleting ticket'
-        });
-    }
-};
-
-// GET tickets by category
-export const getTicketsByCategory = async (
-    req: AuthenticatedRequest,
-    res: Response<ApiResponse<any>>
-): Promise<Response> => {
-    try {
-        const { categoryId } = req.params;
-        const connection = await pool.getConnection();
-
-        try {
-            const [tickets] = await connection.query<RowDataPacket[]>(
-                `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
-                        t.printers_code, t.events_id, t.tickets_category_id,
-                        tc.name as category_name
-                 FROM tickets t
-                 LEFT JOIN tickets_categories tc ON t.tickets_category_id = tc.id
-                 WHERE t.tickets_category_id = ?
-                 ORDER BY t.date ASC, t.name ASC`,
-                [categoryId]
-            );
-
-            connection.release();
-
-            return res.status(200).json({
-                message: 'Category tickets retrieved successfully',
-                data: tickets
-            });
-        } catch (error) {
-            connection.release();
-            throw error;
-        }
-    } catch (error) {
-        console.error('Get tickets by category error:', error);
-        return res.status(500).json({
-            message: 'Server error retrieving category tickets'
         });
     }
 };

@@ -68,6 +68,7 @@ export interface DatabaseConfig {
     waitForConnections: boolean;
     connectionLimit: number;
     queueLimit: number;
+    decimalNumbers: boolean;
 }
 
 // API Response types
