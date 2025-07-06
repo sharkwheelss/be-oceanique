@@ -12,6 +12,8 @@ import {
     getListOptions,
     getReviewForEdit,
     getAllWishlist,
+    addToWishlist,
+    deleteFromWishlist
 } from '../controllers/beachController'
 
 const router: Router = Router();
@@ -25,6 +27,9 @@ router.get('/reviews/:beachId', isAuthenticated, getBeachReviews);
 router.get('/reviews/:reviewId/edit', isAuthenticated, getReviewForEdit);
 
 router.post('/reviews', upload.array('files'), addReview);
+router.post('/wishlist', isAuthenticated, addToWishlist);
+
 router.put('/reviews/:reviewId', upload.array('files'), editReview);
+router.delete('/wishlist/:beaches_id', isAuthenticated, deleteFromWishlist);
 
 export default router;

@@ -749,3 +749,123 @@ export const getAllWishlist = async (
     }
 };
 
+// Add to wishlist
+export const addToWishlist = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const { beaches_id } = req.body;
+
+        // Validate required fields
+        if (!beaches_id) {
+            return res.status(400).json({
+                message: 'Beach ID is required'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        // Check if the wishlist item already exists
+        const [existingWishlist] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM wishlists WHERE users_id = ? AND beaches_id = ?`,
+            [userId, beaches_id]
+        );
+
+        if (existingWishlist.length > 0) {
+            connection.release();
+            return res.status(409).json({
+                message: 'Beach is already in your wishlist'
+            });
+        }
+
+        // Check if beach exists
+        const [beach] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM beaches WHERE id = ?`,
+            [beaches_id]
+        );
+
+        if (beach.length === 0) {
+            connection.release();
+            return res.status(404).json({
+                message: 'Beach not found'
+            });
+        }
+
+        // Add to wishlist
+        const [result] = await connection.query<ResultSetHeader>(
+            `INSERT INTO wishlists (users_id, beaches_id, created_at) VALUES (?, ?, NOW())`,
+            [userId, beaches_id]
+        );
+
+        // Get the added wishlist with beach details
+        const [addedWishlist] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM wishlists
+            ORDER BY created_at DESC`,
+            [result.insertId]
+        );
+
+        connection.release();
+
+        return res.status(201).json({
+            message: 'Beach added to wishlist successfully',
+            data: addedWishlist[0]
+        });
+    } catch (error) {
+        console.error('Add to wishlist error:', error);
+        return res.status(500).json({
+            message: 'Server error adding to wishlist'
+        });
+    }
+};
+
+// Delete from wishlist
+export const deleteFromWishlist = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const { beaches_id } = req.params;
+
+        // Validate required fields
+        if (!beaches_id) {
+            return res.status(400).json({
+                message: 'Beach ID is required'
+            });
+        }
+
+        const connection = await pool.getConnection();
+
+        // Check if the wishlist item exists for this user
+        const [existingWishlist] = await connection.query<RowDataPacket[]>(
+            `SELECT * FROM wishlists WHERE users_id = ? AND beaches_id = ?`,
+            [userId, beaches_id]
+        );
+
+        if (existingWishlist.length === 0) {
+            connection.release();
+            return res.status(404).json({
+                message: 'Beach not found in your wishlist'
+            });
+        }
+
+        // Delete from wishlist
+        await connection.query(
+            `DELETE FROM wishlists WHERE users_id = ? AND beaches_id = ?`,
+            [userId, beaches_id]
+        );
+
+        connection.release();
+
+        return res.status(200).json({
+            message: 'Beach removed from wishlist successfully'
+        });
+    } catch (error) {
+        console.error('Delete from wishlist error:', error);
+        return res.status(500).json({
+            message: 'Server error removing from wishlist'
+        });
+    }
+};

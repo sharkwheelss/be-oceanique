@@ -13,20 +13,18 @@ import {
 
 const getEventStatus = (startDate: string, endDate: string, startTime: string, endTime: string): EventDetail['status'] => {
     const now = new Date();
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+
+    // Combine date and time for accurate comparison
+    const start = new Date(`${startDate}T${startTime}`);
+    const end = new Date(`${endDate}T${endTime}`);
 
     if (now < start) {
         return 'upcoming';
     }
 
-    if (now > end) {
-        return 'ended';
-    }
-
-    // If we're within the date range
+    // If we're within the date/time range
     if (now >= start && now <= end) {
-        // Check if it's ending soon (within 3 days of end date)
+        // Check if it's ending soon (within 3 days of end date/time)
         const daysUntilEnd = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         if (daysUntilEnd <= 3) {
             return 'ended soon';
@@ -34,7 +32,8 @@ const getEventStatus = (startDate: string, endDate: string, startTime: string, e
         return 'ongoing';
     }
 
-    return 'upcoming';
+    // If we're past the end date/time
+    return 'ended';
 };
 
 export const getAllEvents = async (
@@ -111,6 +110,7 @@ export const getEventDetails = async (
             return res.status(400).json({ message: 'Event ID is required' });
         }
 
+        console.log(new Date())
         const connection = await pool.getConnection();
 
         // Get event details with location information
@@ -192,7 +192,8 @@ export const getEventDetails = async (
         connection.release();
 
         // Determine event status
-        const eventStatus = getEventStatus(event.start_date, event.end_date, event.is_active);
+        const eventStatus = getEventStatus(event.start_date, event.end_date, event.start_time, event.end_time);
+        console.log(eventStatus)
 
         // Process tickets based on event status
         const processedTickets = ticketResults.map(ticket => {
