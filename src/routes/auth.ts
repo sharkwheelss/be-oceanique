@@ -4,14 +4,15 @@
  */
 
 import { Router } from 'express';
-import { isAuthenticated } from '../middleware/auth';
+import { isAuthenticated, upload } from '../middleware/auth';
 import { validateSignup, validateSignin } from '../utils/validation';
 import {
     signup,
     signin,
-    getCurrentUser,
     logout,
     checkAuth,
+    viewProfile,
+    editProfile
 } from '../controllers/authController';
 
 
@@ -23,7 +24,8 @@ router.post('/signin', validateSignin, signin);
 router.get('/check', checkAuth);
 
 // Protected routes
-router.get('/me', isAuthenticated, getCurrentUser);
+router.get('/profile', isAuthenticated, viewProfile);
 router.post('/logout', logout);
+router.put('/profile/edit', upload.array('files'), editProfile)
 
 export default router;

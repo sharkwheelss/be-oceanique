@@ -17,6 +17,8 @@ import {
     AuthResponse
 } from '../types';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * User registration controller
@@ -119,7 +121,6 @@ export const signin = async (
             'SELECT * FROM contents WHERE profile_id = ?',
             [users[0]?.id]
         );
-        console.log('imgProfile', imgProfile);
 
         connection.release();
 
@@ -257,4 +258,317 @@ export const checkAuth = (
     return res.status(200).json({
         authenticated: false
     });
+};
+
+export const viewProfile = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<any>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+
+        const connection = await pool.getConnection();
+
+        try {
+            // Get user data
+            const [users] = await connection.query<RowDataPacket[]>(
+                `SELECT * FROM users u
+                LEFT JOIN user_personalities up
+                ON up.id = u.user_personality_id
+                LEFT JOIN contents c
+                ON c.profile_id = u.id
+                WHERE u.id = ?`,
+                [userId]
+            );
+
+            if (users.length === 0) {
+                connection.release();
+                return res.status(404).json({
+                    message: 'User not found'
+                });
+            }
+
+            const user = users[0];
+
+            const [preferenceRows] = await connection.query<RowDataPacket[]>(
+                `SELECT name, score
+                FROM user_preferences up
+                INNER JOIN preference_categories pc ON pc.id = up.preference_categories_id
+                WHERE users_id = ?`,
+                [userId]
+            );
+
+            connection.release();
+
+            // Convert array of { name, score } into object: { name1: score1, name2: score2, ... }
+            const preferenceObject = preferenceRows.reduce((acc, row) => {
+                acc[row.name] = row.score;
+                return acc;
+            }, {} as Record<string, number>);
+
+            // Format response
+            const profileData = {
+                username: user.username,
+                email: user.email,
+                address: user.address,
+                img: `${req.protocol}://${req.get('host')}/uploads/contents/${user.path || 'placeholder-profile.png'}`,
+                created_at: user.created_at,
+                updated_at: user.updated_at,
+                user_personality_id: user.user_personality_id,
+                user_types_id: user.user_types_id,
+                personality: user.name,
+                bank_name: user.bank_name,
+                account_number: user.account_number,
+                account_name: user.account_name,
+                preference: preferenceObject
+            };
+
+
+            return res.status(200).json({
+                message: 'Profile retrieved successfully',
+                data: profileData
+            });
+
+        } catch (error) {
+            connection.release();
+            throw error;
+        }
+    } catch (error) {
+        console.error('View profile error:', error);
+        return res.status(500).json({
+            message: 'Server error retrieving profile data'
+        });
+    }
+};
+
+// Edit Profile API
+export const editProfile = async (
+    req: AuthenticatedRequest,
+    res: Response<ApiResponse<null>>
+): Promise<Response> => {
+    try {
+        const userId = req.session.userId;
+        const {
+            username,
+            email,
+            address,
+            keepExistingProfilePicture,
+            bank_name,
+            account_number,
+            account_name,
+            password,
+            currentPassword
+        } = req.body;
+
+        // console.log(req.body)
+        // Handle uploaded profile picture files
+        const files = req.files as Express.Multer.File[] | undefined;
+
+        // Basic validation
+        if (!username || !email) {
+            return res.status(400).json({
+                message: 'Username and email are required'
+            });
+        }
+
+        // Email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                message: 'Invalid email format'
+            });
+        }
+
+        if (keepExistingProfilePicture === 'false' && (!files || files.length === 0)) {
+            return res.status(400).json({
+                message: 'Please provide a new picture'
+            });
+        }
+
+        // Password validation if provided
+        if (password) {
+            if (!currentPassword) {
+                return res.status(400).json({
+                    message: 'Current password is required to update password'
+                });
+            }
+
+            if (password.length < 6) {
+                return res.status(400).json({
+                    message: 'New password must be at least 6 characters long'
+                });
+            }
+        }
+
+        const connection = await pool.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            // Check if user exists and get current password if needed
+            const [existingUser] = await connection.query<RowDataPacket[]>(
+                'SELECT * FROM users WHERE id = ?',
+                [userId]
+            );
+
+            if (existingUser.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(404).json({
+                    message: 'User not found'
+                });
+            }
+
+            // Verify current password if user wants to update password
+            if (password) {
+                const isCurrentPasswordValid = await bcrypt.compare(
+                    currentPassword,
+                    existingUser[0].password
+                );
+
+                if (!isCurrentPasswordValid) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(401).json({
+                        message: 'Current password is incorrect'
+                    });
+                }
+            }
+
+            // Check if username or email already exists (excluding current user)
+            const [duplicateCheck] = await connection.query<RowDataPacket[]>(
+                'SELECT id FROM users WHERE (username = ? OR email = ?) AND id != ?',
+                [username, email, userId]
+            );
+
+            if (duplicateCheck.length > 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(409).json({
+                    message: 'Username or email already exists'
+                });
+            }
+
+            // Handle profile picture management - FIXED: Only delete if explicitly told not to keep existing files
+            if (keepExistingProfilePicture === 'false' || keepExistingProfilePicture === false) {
+                // Only delete existing profile pictures if user explicitly chose not to keep them
+                const [existingContents] = await connection.query<RowDataPacket[]>(
+                    'SELECT path FROM contents WHERE profile_id = ?',
+                    [userId]
+                );
+
+                // Delete physical files
+                for (const content of existingContents) {
+                    try {
+                        const uploadDir = path.resolve(__dirname, '../../uploads/contents');
+                        const filePath = path.join(uploadDir, content.path);
+                        if (fs.existsSync(filePath)) {
+                            fs.unlinkSync(filePath);
+                        }
+                    } catch (err) {
+                        console.warn('Failed to delete profile picture file:', content.path, err);
+                    }
+                }
+
+                // Delete content records
+                await connection.query(
+                    'DELETE FROM contents WHERE profile_id = ?',
+                    [userId]
+                );
+            }
+
+            // Handle new profile picture uploads - Always add new files if provided
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    // Validate file type - only allow images for profile pictures
+                    if (!file.mimetype.startsWith('image/')) {
+                        await connection.rollback();
+                        connection.release();
+                        return res.status(400).json({
+                            message: 'Only image files are allowed for profile picture'
+                        });
+                    }
+
+                    // Step 1: Insert initial row with empty path
+                    const [contentResult] = await connection.query<ResultSetHeader>(
+                        `INSERT INTO contents (path, type, profile_id) 
+                        VALUES (?, ?, ?)`,
+                        ['', 'photo', userId]
+                    );
+
+                    const contentId = contentResult.insertId;
+                    const extension = path.extname(file.originalname); // e.g., .jpg
+                    const newFilename = `profile_${contentId}${extension}`;
+
+                    // Step 2: Rename the uploaded file in the filesystem
+                    const uploadDir = path.resolve(__dirname, '../../uploads/contents');
+
+                    const oldPath = path.join(uploadDir, file.filename);
+                    const newPath = path.join(uploadDir, newFilename);
+
+                    // Ensure directory exists (in case not created yet)
+                    if (!fs.existsSync(uploadDir)) {
+                        fs.mkdirSync(uploadDir, { recursive: true });
+                    }
+
+                    fs.renameSync(oldPath, newPath); // rename file to match contentId
+
+                    // Step 3: Update contents table with the correct path
+                    await connection.query(
+                        `UPDATE contents SET path = ? WHERE id = ?`,
+                        [newFilename, contentId]
+                    );
+                }
+            }
+
+            // Prepare update query - conditionally include password
+            let updateQuery = `UPDATE users SET 
+                 username = ?, 
+                 email = ?,
+                 address = ?,
+                 bank_name = ?,
+                 account_number = ?,
+                 account_name = ?`;
+
+            let updateParams = [
+                username,
+                email,
+                address || null,
+                bank_name || null,
+                account_number || null,
+                account_name || null
+            ];
+
+            // Add password to update if provided
+            if (password) {
+                const saltRounds = 10;
+                const hashedPassword = await bcrypt.hash(password, saltRounds);
+                updateQuery += `, password = ?`;
+                updateParams.push(hashedPassword);
+            }
+
+            updateQuery += `, updated_at = NOW() WHERE id = ?`;
+            updateParams.push(userId);
+
+            // Update user data
+            await connection.query(updateQuery, updateParams);
+
+            await connection.commit();
+            connection.release();
+
+            return res.status(200).json({
+                message: 'Profile updated successfully'
+            });
+
+        } catch (error) {
+            await connection.rollback();
+            connection.release();
+            throw error;
+        }
+    } catch (error) {
+        console.error('Edit profile error:', error);
+        return res.status(500).json({
+            message: 'Server error updating profile'
+        });
+    }
 };

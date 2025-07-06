@@ -11,22 +11,15 @@ import {
     EventDetailWithTickets,
 } from '../types';
 
-const getEventStatus = (startDate: string, endDate: string, isActive: number): EventDetail['status'] => {
+const getEventStatus = (startDate: string, endDate: string, startTime: string, endTime: string): EventDetail['status'] => {
     const now = new Date();
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    // If not active, it's ended
-    if (isActive === 0) {
-        return 'ended';
-    }
-
-    // If current date is before start date, it's upcoming
     if (now < start) {
         return 'upcoming';
     }
 
-    // If current date is after end date, it should be ended (but check is_active)
     if (now > end) {
         return 'ended';
     }
@@ -85,7 +78,7 @@ export const getAllEvents = async (
 
         // Process events and determine status
         let processedEvents: EventDetail[] = events.map(event => {
-            const eventStatus = getEventStatus(event.start_date, event.end_date, event.is_active);
+            const eventStatus = getEventStatus(event.start_date, event.end_date, event.start_time, event.end_time);
 
             return {
                 ...(event as EventDetail),
