@@ -15,8 +15,8 @@ const getEventStatus = (startDate: string, endDate: string, startTime: string, e
     const now = new Date();
 
     // Combine date and time for accurate comparison
-    const start = new Date(`${startDate}T${startTime}`);
-    const end = new Date(`${endDate}T${endTime}`);
+    const start = new Date(startDate);
+    const end = new Date(endDate);
 
     if (now < start) {
         return 'upcoming';
@@ -30,10 +30,11 @@ const getEventStatus = (startDate: string, endDate: string, startTime: string, e
             return 'ended soon';
         }
         return 'ongoing';
+    } else {
+        return 'ended';
     }
 
     // If we're past the end date/time
-    return 'ended';
 };
 
 export const getAllEvents = async (
@@ -193,7 +194,7 @@ export const getEventDetails = async (
 
         // Determine event status
         const eventStatus = getEventStatus(event.start_date, event.end_date, event.start_time, event.end_time);
-        console.log(eventStatus)
+        // console.log(eventStatus)
 
         // Process tickets based on event status
         const processedTickets = ticketResults.map(ticket => {
