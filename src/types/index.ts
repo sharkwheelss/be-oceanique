@@ -78,6 +78,7 @@ export interface ApiResponse<T = any> {
     user?: T;
     errors?: any[];
     data?: T[];
+    success?: boolean;
 }
 
 export interface AuthResponse {

@@ -108,15 +108,6 @@ export const signin = async (
             });
         }
 
-        // const bcrypt = require('bcrypt');
-
-        // const hash = '$2b$10$Zp3KgBv6G5DPJ4inMRAhz.8L4TXyztDt87oDXT5BXZFGkqXTqu3Qm';
-        // const pass = '123456';
-
-        // bcrypt.compare(pass, hash).then((result) => {
-        //     console.log(result ? 'Matched!' : 'Not matched.');
-        // });
-
         const { login, password }: SigninRequest = req.body;
 
         // Find user by email or username

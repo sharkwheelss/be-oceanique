@@ -15,7 +15,8 @@ import {
     deleteTicket,
     getBookingsList,
     getBookingDetails,
-    updateBookingStatus
+    updateBookingStatus,
+    checkBankAccountStatus
 } from '../controllers/adminTicketController'
 
 const router: Router = Router();

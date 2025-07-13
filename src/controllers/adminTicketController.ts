@@ -258,6 +258,24 @@ export const getTickets = async (
         const connection = await pool.getConnection();
 
         try {
+            // First check bank account status
+            const [bankAccount] = await connection.query<RowDataPacket[]>(
+                `SELECT bank_name, account_number, account_name 
+                    FROM users
+                    WHERE id = ?;`,
+                [userId]
+            );
+
+            if (bankAccount.length === 0 || !bankAccount[0].bank_name || !bankAccount[0].account_number
+                || !bankAccount[0].account_name
+            ) {
+                connection.release();
+                return res.status(400).json({
+                    message: 'Please set your bank account first'
+                });
+            }
+
+            // If bank account is set, fetch tickets
             const [tickets] = await connection.query<RowDataPacket[]>(
                 `SELECT t.id, t.name, t.description, t.quota, t.price, t.date, 
                         t.private_code, tc.name as category_name, e.name as event_name,
@@ -732,3 +750,4 @@ export const updateBookingStatus = async (
         });
     }
 };
+
