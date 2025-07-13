@@ -442,7 +442,17 @@ export const getAllTransactions = async (
         const connection = await pool.getConnection();
 
         const [transactions] = await connection.query<RowDataPacket[]>(
-            `SELECT * FROM bookings WHERE users_id = ?`,
+            `SELECT t.name as ticket_name, tc.name as ticket_category_name, t.id, t.description, b.subtotal, b.status, b.group_booking_id,
+            b.booked_at, t.date, b.payment_method, b.updated_at, b.total_payment, count(total_tickets) as total_tickets
+            FROM bookings b
+            INNER JOIN tickets t
+            ON b.tickets_id = t.id
+            INNER JOIN tickets_categories tc
+            ON t.tickets_categories_id = tc.id
+            WHERE b.users_id = 2
+            GROUP BY t.name, tc.name, b.status, t.id, b.subtotal, b.group_booking_id, b.updated_at,
+            b.booked_at, t.date, b.payment_method, b.total_payment
+            ORDER BY b.booked_at DESC;`,
             [userId]
         );
 
