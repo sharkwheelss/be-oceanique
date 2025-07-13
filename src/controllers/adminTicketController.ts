@@ -414,6 +414,7 @@ export const createTicket = async (
             connection.release();
 
             return res.status(201).json({
+                success: true,
                 message: 'Ticket created successfully',
                 data: createdTicket[0]
             });
@@ -478,6 +479,7 @@ export const updateTicket = async (
             connection.release();
 
             return res.status(200).json({
+                success: true,
                 message: 'Ticket updated successfully',
                 data: updatedTicket[0]
             });
@@ -504,20 +506,32 @@ export const deleteTicket = async (
         const connection = await pool.getConnection();
 
         try {
+
+            // check if ticket have transaction
+            const [ticketHasBooked] = await connection.query<RowDataPacket[]>(
+                `SELECT COUNT(*) as count FROM bookings WHERE tickets_id = ?`,
+                [id]
+            )
+
+            if (ticketHasBooked[0].count > 0) {
+                return res.status(400).json({
+                    message: 'Cannot delete ticket that has transaction'
+                })
+            }
+
             const [result] = await connection.query<ResultSetHeader>(
                 `DELETE FROM tickets WHERE id = ? AND users_id = ?`,
                 [id, userId]
             );
-
-            connection.release();
-
             if (result.affectedRows === 0) {
                 return res.status(404).json({
                     message: 'Ticket not found'
                 });
             }
+            connection.release();
 
             return res.status(200).json({
+                success: true,
                 message: 'Ticket deleted successfully'
             });
         } catch (error) {

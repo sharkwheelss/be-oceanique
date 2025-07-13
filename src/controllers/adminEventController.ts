@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { pool } from '../config/database'; // Adjust import path as needed
 import { AuthenticatedRequest, ApiResponse } from '../types'; // Adjust import path as needed
+import { start } from 'repl';
 
 // Create Event API
 export const createEvent = async (
@@ -260,6 +261,11 @@ export const updateEvent = async (
             });
         }
 
+        if (start_date > end_date || end_date < start_date) {
+            return res.status(400).json({
+                message: 'End date must be after start date'
+            });
+        }
 
         const connection = await pool.getConnection();
 
@@ -411,6 +417,20 @@ export const deleteEvent = async (
                 });
             }
 
+            // Check if event doesn't have tickets
+            const [ticketCheck] = await connection.query<RowDataPacket[]>(
+                'SELECT COUNT(*) as count FROM tickets WHERE events_id = ?',
+                [eventId]
+            );
+
+            if (ticketCheck[0].count > 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(400).json({
+                    message: 'Cannot delete event with existing tickets'
+                });
+            }
+
             // Get existing content files before deletion
             const [existingContents] = await connection.query<RowDataPacket[]>(
                 'SELECT path FROM contents WHERE events_id = ?',
@@ -446,6 +466,7 @@ export const deleteEvent = async (
             connection.release();
 
             return res.status(200).json({
+                success: true,
                 message: 'Event deleted successfully'
             });
         } catch (error) {
