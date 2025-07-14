@@ -67,7 +67,8 @@ export const getAllEvents = async (
             LEFT JOIN kecamatans k ON k.id = b.kecamatans_id
             LEFT JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id
             LEFT JOIN provinsis p ON p.id = kk.provinsis_id
-            LEFT JOIN contents c ON c.events_id = e.id;
+            LEFT JOIN contents c ON c.events_id = e.id
+            ORDER BY e.start_date DESC, e.start_time DESC;
         `
         );
         connection.release();

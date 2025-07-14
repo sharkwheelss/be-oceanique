@@ -28,7 +28,7 @@ export const getAllBeaches = async (
             FROM beaches b INNER JOIN kecamatans k ON k.id = b.kecamatans_id
             INNER JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id
             INNER JOIN provinsis p ON p.id = kk.provinsis_id
-            INNER JOIN contents c ON c.beaches_id = b.id
+            LEFT JOIN contents c ON c.beaches_id = b.id
             WHERE c.reviews_id IS NULL
             ORDER BY b.id ASC;`
         );
@@ -73,11 +73,12 @@ export const getBeachDetails = async (
             INNER JOIN kecamatans k ON k.id = b.kecamatans_id
             INNER JOIN kabupatens_kotas kk ON kk.id = k.kabupatens_id
             INNER JOIN provinsis p ON p.id = kk.provinsis_id
-            INNER JOIN contents c ON c.beaches_id = b.id
+            LEFT JOIN contents c ON c.beaches_id = b.id
             WHERE b.id = ?
             ORDER BY b.id ASC;`,
             [id]
         );
+        
 
         if (!beachDetails.length) {
             connection.release();
