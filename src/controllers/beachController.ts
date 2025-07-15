@@ -33,20 +33,37 @@ export const getAllBeaches = async (
             ORDER BY b.id ASC;`
         );
 
+        const [eventAvail] = await connection.query<RowDataPacket[]>(
+            `SELECT b.id, COUNT(e.id) as event_count 
+            FROM beaches b LEFT JOIN events e 
+            ON e.beaches_id = b.id 
+            GROUP BY b.id;`
+        );
+
         connection.release();
 
         if (beaches.length === 0) {
             return res.status(404).json({ message: 'No beaches found' });
         }
 
-        const imgBeach: BeachDetail[] = beaches.map(beach => ({
+        // Map event counts to beaches
+        const beachesWithEvents = beaches.map(beach => {
+            const event = eventAvail.find(e => e.id === beach.id);
+            return {
+                ...beach,
+                event_count: event?.event_count || 0
+            };
+        });
+
+        // Add image paths and ensure proper typing
+        const imgBeach: BeachDetail[] = beachesWithEvents.map(beach => ({
             ...(beach as BeachDetail),
             img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${beach.path}`
         }));
 
         return res.status(200).json({
             message: 'Beaches retrieved successfully',
-            data: imgBeach as BeachDetail[]
+            data: imgBeach
         });
     } catch (error) {
         console.error('Get beaches error:', error);
@@ -78,7 +95,7 @@ export const getBeachDetails = async (
             ORDER BY b.id ASC;`,
             [id]
         );
-        
+
 
         if (!beachDetails.length) {
             connection.release();
@@ -203,7 +220,7 @@ export const getBeachReviews = async (
 
         // Get all reviews with user details
         const [reviewsResult] = await connection.query<RowDataPacket[]>(
-            `SELECT r.id as review_id, u.id as user_id, u.username, 
+            `SELECT r.id as review_id, u.id as user_id, u.username, MIN(up.name) as personality, 
             YEAR(u.created_at) as join_date, r.rating,
             r.user_review, DATE_FORMAT(r.created_at, '%d %M %Y') as posted,
             COUNT(b.id) as experience
@@ -304,6 +321,7 @@ export const getBeachReviews = async (
             user_review: review.user_review,
             posted: review.posted,
             experience: review.experience,
+            personality: review.personality,
             contents: contentsByReview[review.review_id] || [],
             option_votes: optionVotesByReview[review.review_id] || [],
             user_profile: profilesByUser[review.user_id] || undefined
@@ -733,14 +751,21 @@ export const getAllWishlist = async (
         const [wishlists] = await connection.query<RowDataPacket[]>(
             `SELECT * FROM wishlists w
             INNER JOIN beaches b ON w.beaches_id = b.id
-            WHERE w.users_id = ?;`,
+            LEFT JOIN contents c ON c.beaches_id = b.id
+            WHERE w.users_id = ? AND c.reviews_id IS NULL;`,
             [userId]
         );
 
         connection.release();
+
+        const imgBeach = wishlists.map(beach => ({
+            ...(beach as BeachDetail),
+            img_path: `${req.protocol}://${req.get('host')}/uploads/contents/${beach.path}`
+        }));
+
         return res.status(200).json({
             message: 'Wishlists retrieved successfully',
-            data: wishlists
+            data: imgBeach
         });
     } catch (error) {
         console.error('Get all wishlists error:', error);
