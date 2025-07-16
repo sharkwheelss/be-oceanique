@@ -221,9 +221,9 @@ export const getBeachReviews = async (
         // Get all reviews with user details
         const [reviewsResult] = await connection.query<RowDataPacket[]>(
             `SELECT r.id as review_id, u.id as user_id, u.username, MIN(up.name) as personality, 
-            YEAR(u.created_at) as join_date, r.rating,
-            r.user_review, DATE_FORMAT(r.created_at, '%d %M %Y') as posted,
-            COUNT(b.id) as experience
+                YEAR(u.created_at) as join_date, r.rating,
+                r.user_review, DATE_FORMAT(r.created_at, '%d %M %Y') as posted,
+                SUM(CASE WHEN b.status = 'approved' THEN 1 ELSE 0 END) AS experience
             FROM reviews r
             INNER JOIN users u ON u.id = r.users_id
             INNER JOIN user_personalities up ON up.id = u.user_personality_id

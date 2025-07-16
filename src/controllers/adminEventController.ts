@@ -21,7 +21,8 @@ export const createEvent = async (
             end_date,
             end_time,
             jenis,
-            beaches_id
+            beaches_id,
+            social_media
         } = req.body;
 
         // Handle uploaded files
@@ -45,9 +46,9 @@ export const createEvent = async (
 
             // Insert new event
             const [eventResult] = await connection.query<ResultSetHeader>(
-                `INSERT INTO events (name, description, start_date, start_time, end_date, end_time, jenis, beaches_id, users_id) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [name, description, start_date, start_time, end_date, end_time, jenis, beaches_id, userId]
+                `INSERT INTO events (name, description, start_date, start_time, end_date, end_time, jenis, social_media, beaches_id, users_id) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [name, description, start_date, start_time, end_date, end_time, jenis, social_media, beaches_id, userId]
             );
 
             const eventId = eventResult.insertId;
@@ -134,20 +135,19 @@ export const getEventsList = async (
             connection.release();
 
             const now = new Date();
-            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            // const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
             const eventStatus = events.map(event => {
                 const start = new Date(event.start_datetime);
                 const end = new Date(event.end_datetime);
+                // console.log(start, end, tomorrow, now)
 
                 const status =
                     start <= now && end >= now
                         ? 'ongoing'
-                        : start > now && start <= tomorrow
-                            ? 'ended soon'
-                            : end < now
-                                ? 'ended'
-                                : 'upcoming';
+                        : end < now
+                            ? 'ended'
+                            : 'upcoming';
 
                 return { ...event, status };
             });
@@ -188,7 +188,7 @@ export const getEventDetail = async (
             // Get event details with beach info
             const [eventDetails] = await connection.query<RowDataPacket[]>(
                 `SELECT e.id, e.name, e.description, e.start_date, e.start_time, e.end_date, e.end_time,
-                        e.jenis, b.id as beach_id, b.beach_name, c.path
+                        e.jenis, b.id as beach_id, b.beach_name, c.path, e.social_media
                  FROM events e 
                  INNER JOIN beaches b ON e.beaches_id = b.id
                  LEFT JOIN contents c ON e.id = c.events_id
@@ -243,7 +243,8 @@ export const updateEvent = async (
             end_time,
             jenis,
             beaches_id,
-            keepExistingFiles
+            keepExistingFiles,
+            social_media
         } = req.body;
 
         // Handle uploaded files
@@ -296,9 +297,10 @@ export const updateEvent = async (
                  start_time = ?,
                  end_date = ?,
                  end_time = ?,
-                 beaches_id = ?
+                 beaches_id = ?,
+                 social_media = ?
                  WHERE id = ?`,
-                [name, description, jenis, start_date, start_time, end_date, end_time, beaches_id, eventId]
+                [name, description, jenis, start_date, start_time, end_date, end_time, beaches_id, social_media, eventId]
             );
 
             // Step 1: Remove existing file (if not keeping it)

@@ -11,30 +11,21 @@ import {
     EventDetailWithTickets,
 } from '../types';
 
-const getEventStatus = (startDate: string, endDate: string, startTime: string, endTime: string): EventDetail['status'] => {
+const getEventStatus = (start_datetime: string, end_datetime: string): EventDetail['status'] => {
     const now = new Date();
 
     // Combine date and time for accurate comparison
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = new Date(start_datetime);
+    const end = new Date(end_datetime);
 
-    if (now < start) {
-        return 'upcoming';
-    }
+    const status =
+        start <= now && end >= now
+            ? 'ongoing'
+            : end < now
+                ? 'ended'
+                : 'upcoming';
 
-    // If we're within the date/time range
-    if (now >= start && now <= end) {
-        // Check if it's ending soon (within 3 days of end date/time)
-        const daysUntilEnd = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysUntilEnd <= 3) {
-            return 'ended soon';
-        }
-        return 'ongoing';
-    } else {
-        return 'ended';
-    }
-
-    // If we're past the end date/time
+    return status;
 };
 
 export const getAllEvents = async (
@@ -61,7 +52,9 @@ export const getAllEvents = async (
                 p.name as province,
                 kk.name as city,
                 k.name as subdistrict,
-                c.path
+                c.path,
+                CONCAT(e.start_date,' ', e.start_time) as start_datetime, 
+                CONCAT(e.end_date,' ', e.end_time) as end_datetime
             FROM events e 
             LEFT JOIN beaches b ON b.id = e.beaches_id
             LEFT JOIN kecamatans k ON k.id = b.kecamatans_id
@@ -79,7 +72,7 @@ export const getAllEvents = async (
 
         // Process events and determine status
         let processedEvents: EventDetail[] = events.map(event => {
-            const eventStatus = getEventStatus(event.start_date, event.end_date, event.start_time, event.end_time);
+            const eventStatus = getEventStatus(event.start_datetime, event.end_datetime);
 
             return {
                 ...(event as EventDetail),
@@ -112,7 +105,7 @@ export const getEventDetails = async (
             return res.status(400).json({ message: 'Event ID is required' });
         }
 
-        console.log(new Date())
+        // console.log(new Date())
         const connection = await pool.getConnection();
 
         // Get event details with location information
@@ -120,7 +113,8 @@ export const getEventDetails = async (
             `SELECT 
                 e.id, 
                 e.name, 
-                e.description, 
+                e.description,
+                e.social_media,
                 e.is_active, 
                 e.start_date, 
                 e.end_date, 
@@ -134,7 +128,9 @@ export const getEventDetails = async (
                 p.name as province,
                 kk.name as city,
                 k.name as subdistrict,
-                c.path
+                c.path,
+                CONCAT(e.start_date,' ', e.start_time) as start_datetime, 
+                CONCAT(e.end_date,' ', e.end_time) as end_datetime
             FROM events e 
             LEFT JOIN beaches b ON b.id = e.beaches_id
             LEFT JOIN kecamatans k ON k.id = b.kecamatans_id
@@ -194,7 +190,7 @@ export const getEventDetails = async (
         connection.release();
 
         // Determine event status
-        const eventStatus = getEventStatus(event.start_date, event.end_date, event.start_time, event.end_time);
+        const eventStatus = getEventStatus(event.start_datetime, event.end_datetime);
         // console.log(eventStatus)
 
         // Process tickets based on event status
@@ -230,6 +226,7 @@ export const getEventDetails = async (
             id: event.id,
             name: event.name,
             description: event.description,
+            social_media: event.social_media,
             is_active: event.is_active,
             start_date: event.start_date,
             end_date: event.end_date,
